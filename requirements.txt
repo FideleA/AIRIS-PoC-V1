@@ -1,0 +1,7 @@
+﻿streamlit>=1.26,<3
+pandas>=2.0,<3
+requests>=2.31,<3
+folium>=0.14,<1
+streamlit-folium>=0.14,<1
+pytest>=7.4,<8
+altair>=5.0,<7
