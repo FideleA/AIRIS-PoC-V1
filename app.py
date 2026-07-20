@@ -6,7 +6,13 @@ from typing import Optional
 
 import altair as alt
 
-from config import CARDIFF_CENTER, CARDIFF_ZOOM, MODEL_VERSION, WEIGHTS, RISK_BANDS, TEMPERATURE_THRESHOLDS
+from config import (
+    CARDIFF_CENTER, CARDIFF_ZOOM, MODEL_VERSION, WEIGHTS, RISK_BANDS,
+    TEMPERATURE_THRESHOLDS, DATA_MODE, DATA_MODE_LABELS,
+    OPEN_CHARGE_MAP_ATTRIBUTION, NRW_ATTRIBUTION, WIMD_ATTRIBUTION,
+    ONS_OS_ATTRIBUTION, STATWALES_PROVIDER_STATEMENT, MAP_ATTRIBUTION,
+    WEATHER_ATTRIBUTION,
+)
 from data_loader import load_stations
 from scoring import compute_scores
 from weather_service import fetch_open_meteo, WeatherServiceError
@@ -16,8 +22,49 @@ st.set_page_config(page_title="AIRIS Cardiff PoC Dashboard", layout="wide")
 
 
 @st.cache_data
-def get_stations() -> pd.DataFrame:
-    return load_stations()
+def get_stations(data_mode: str) -> pd.DataFrame:
+    return load_stations(mode=data_mode)
+
+
+def dataset_mode_label(data_mode: str) -> str:
+    return DATA_MODE_LABELS[data_mode]
+
+
+def attribution_statements(data_mode: str) -> list[str]:
+    statements = [WEATHER_ATTRIBUTION, MAP_ATTRIBUTION]
+    if data_mode == "verified":
+        statements = [
+            OPEN_CHARGE_MAP_ATTRIBUTION,
+            NRW_ATTRIBUTION,
+            STATWALES_PROVIDER_STATEMENT,
+            WIMD_ATTRIBUTION,
+            ONS_OS_ATTRIBUTION,
+            *statements,
+        ]
+    return statements
+
+
+def verified_site_details(station) -> list[tuple[str, object]]:
+    fields = [
+        ("Operator", "operator_name"),
+        ("Operational status", "operational_status"),
+        ("Source provider", "data_provider"),
+        ("Source last updated", "source_last_updated"),
+        ("River flood band", "flood_river_band"),
+        ("Sea flood band", "flood_sea_band"),
+        ("Surface-water flood band", "flood_surface_water_band"),
+        ("Dominant flood source", "flood_dominant_source"),
+        ("LSOA", "lsoa_name"),
+        ("Income-deprivation percentage", "income_deprivation_percentage"),
+        ("Enrichment timestamp", "enrichment_timestamp"),
+        ("Dataset version", "dataset_version"),
+    ]
+    details = []
+    for label, field in fields:
+        value = station.get(field)
+        if value is not None and not pd.isna(value) and str(value).strip():
+            details.append((label, value))
+    return details
 
 
 @st.cache_data(ttl=1800)
@@ -126,8 +173,7 @@ def compute_site_scores_safe(station):
         return None, None, weather.get("error"), weather
     try:
         cur = compute_scores(station["flood_score"], weather["current_temperature_c"], station["deprivation_score"])
-        # use first forecast day's max
-        forecast_temp = weather["forecast_max_temperature_c"][0]
+        forecast_temp = weather["seven_day_max_temperature_c"]
         fcast = compute_scores(station["flood_score"], forecast_temp, station["deprivation_score"])
         return cur, fcast, None, weather
     except Exception as e:
@@ -137,9 +183,10 @@ def compute_site_scores_safe(station):
 def main():
     st.title("AIRIS Cardiff PoC Dashboard")
     st.subheader("EV charging-site risk intelligence — research demonstrator")
+    st.info(f"**Active data mode: {dataset_mode_label(DATA_MODE)}**")
 
     try:
-        stations = get_stations()
+        stations = get_stations(DATA_MODE)
     except ValueError as err:
         st.error(f"Failed to load station data: {err}")
         return
@@ -158,8 +205,14 @@ def main():
             st.write("Score range: 0–100")
             st.write("Forecast horizon: 7 days")
         with st.expander('Data sources'):
-            st.write('Station sample data: demonstrative only')
-            st.write('Weather: Open-Meteo; Map tiles: OpenStreetMap contributors')
+            st.write(f"Active station dataset: {dataset_mode_label(DATA_MODE)}")
+            if DATA_MODE == "verified":
+                st.caption(
+                    "Public-source and geospatially enriched does not mean guaranteed, "
+                    "certified, complete, or fully authoritative."
+                )
+            for statement in attribution_statements(DATA_MODE):
+                st.write(statement)
 
     # Compute scores for all stations (with graceful handling)
     results = []
@@ -264,7 +317,7 @@ def main():
                 if weather and 'current_temperature_c' in weather:
                     st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
                 if weather and 'forecast_max_temperature_c' in weather:
-                    st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('forecast_max_temperature_c')[0])}")
+                    st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('seven_day_max_temperature_c'))}")
                 # contribution chart (weighted point contributions)
                 contrib = {
                     'Flood exposure': cur['flood_contribution'],
@@ -287,7 +340,22 @@ def main():
                 st.write("Current score: N/A")
             # assessment details
             with st.expander('Assessment details', expanded=False):
-                st.write("Data source: Station sample PoC data (data/stations.csv)")
+                st.write(f"Data mode: {dataset_mode_label(DATA_MODE)}")
+                if DATA_MODE == "sample":
+                    st.write("Data source: demonstrative PoC station data (data/stations.csv)")
+                else:
+                    st.write("Data source: data/processed/cardiff_stations_verified.csv")
+                    st.caption(
+                        "Public-source data are enriched for this research PoC and are "
+                        "not guaranteed, certified, or fully authoritative."
+                    )
+                    for label, value in verified_site_details(sel["row"]):
+                        if label == "Income-deprivation percentage":
+                            try:
+                                value = f"{float(value):.1f}%"
+                            except (TypeError, ValueError):
+                                pass
+                        st.write(f"{label}: {value}")
                 st.write("Weather provider: Open-Meteo")
                 if cur:
                     st.write(f"Model version: {cur['model_version']}")
@@ -298,9 +366,9 @@ def main():
         st.header("Proposed site")
         lat = st.number_input("Latitude", value=float(CARDIFF_CENTER[0]))
         lon = st.number_input("Longitude", value=float(CARDIFF_CENTER[1]))
-        st.caption("For this demonstrator, flood and deprivation scores are entered manually. Automated geospatial matching is planned for a later iteration.")
-        pflood = st.slider("Flood exposure score", 0, 100, 50, help="Illustrative standardised score (0–100)")
-        pdep = st.slider("Income deprivation score", 0, 100, 50, help="Illustrative standardised score (0–100)")
+        st.caption("For proposed sites, flood and deprivation scores are manually entered. Arbitrary coordinates are not geospatially matched by this dashboard.")
+        pflood = st.slider("Manually entered flood exposure score", 0, 100, 50, help="Illustrative standardised score (0–100)")
+        pdep = st.slider("Manually entered income deprivation score", 0, 100, 50, help="Illustrative standardised score (0–100)")
         if st.button("Assess proposed site"):
             weather = cached_weather(lat, lon)
             if weather.get('error'):
@@ -308,7 +376,7 @@ def main():
                 st.write("Cannot calculate forecast score without weather data.")
             else:
                 cur = compute_scores(pflood, weather['current_temperature_c'], pdep)
-                fcast = compute_scores(pflood, weather['forecast_max_temperature_c'][0], pdep)
+                fcast = compute_scores(pflood, weather['seven_day_max_temperature_c'], pdep)
                 # display same visual format as selected site
                 pc1, pc2 = st.columns(2)
                 pc1.metric('Current score', format_score(cur['overall_score']))
@@ -323,7 +391,7 @@ def main():
                 if weather and weather.get('retrieved_at'):
                     st.write(f"Calculated using model {MODEL_VERSION} and weather retrieved at {weather['retrieved_at']}.")
                 st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
-                st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('forecast_max_temperature_c')[0])}")
+                st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('seven_day_max_temperature_c'))}")
                 contrib = {
                     'Flood exposure': cur['flood_contribution'],
                     'Temperature': cur['temperature_contribution'],
@@ -345,7 +413,8 @@ def main():
     # Footer disclaimer and attribution
     st.markdown("---")
     st.caption("This is an illustrative research PoC. It does not predict claims, calculate premiums or automate underwriting.")
-    st.caption("Weather data: Open-Meteo. Map tiles: OpenStreetMap contributors.")
+    for statement in attribution_statements(DATA_MODE):
+        st.caption(statement)
 
 
 if __name__ == '__main__':

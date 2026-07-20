@@ -33,6 +33,26 @@ pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
+The central data-mode setting is `DATA_MODE` in `config.py`. It defaults to
+the public-source verified Cardiff dataset. Demonstrative sample mode remains
+available for a local run with:
+
+```powershell
+$env:AIRIS_DATA_MODE = "sample"
+python -m streamlit run app.py
+```
+
+or:
+
+```powershell
+$env:AIRIS_DATA_MODE = "verified"
+python -m streamlit run app.py
+```
+
+Verified mode reads `data/processed/cardiff_stations_verified.csv`. A missing,
+empty, malformed, or duplicate-ID verified dataset produces an explicit error;
+the application does not silently fall back to sample data.
+
 ## Test
 
 ```powershell
@@ -52,7 +72,7 @@ python -m pytest
 3. Select the `main` branch for deployment.
 4. Set the app entry point to `app.py`.
 5. Use Python `3.12` for the app environment.
-6. Confirm the app launches and displays the Cardiff map with sample sites and dashboard metrics.
+6. Confirm the app launches and displays the Cardiff map with the configured data mode and dashboard metrics.
 
 ## Deployment checklist
 
