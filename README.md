@@ -1,33 +1,32 @@
-## AIRIS Cardiff PoC — Setup and quick start
+# AIRIS Cardiff PoC
 
-This repository contains a research proof‑of‑concept (PoC) for AIRIS (AI‑enabled Risk Intelligence Service) limited to Cardiff.
+A research proof-of-concept for AIRIS (AI-enabled Risk Intelligence Service) focused on Cardiff. The app uses sample site data in `data/stations.csv`, Open-Meteo weather, and OpenStreetMap tiles.
 
-These are demonstrator materials. Station records in `data/stations.csv` are sample PoC data only.
-Weather data is provided by Open-Meteo and map tiles are provided by OpenStreetMap contributors.
+## Setup
 
-### Setup (Windows, Conda or venv)
+1. Create and activate a Python 3.12 environment.
 
-1. Create and activate a Conda environment with Python 3.12:
+Windows (Conda):
 
 ```powershell
 conda create -n airis-poc python=3.12 -y
 conda activate airis-poc
 ```
 
-2. Or create a virtual environment:
+Windows (venv):
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-3. Install dependencies:
+2. Install dependencies:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-### Run
+## Run
 
 ```powershell
 python -m streamlit run app.py
@@ -39,31 +38,31 @@ python -m streamlit run app.py
 python -m pytest
 ```
 
-## Deployment to Streamlit Community Cloud
+## Deployment
 
-1. Push this repository to GitHub and ensure the application root contains:
-   - `app.py`
-   - `requirements.txt`
-   - `README.md`
-   - `data/stations.csv`
-   - `.streamlit/config.toml`
-   - `.streamlit/secrets.toml` should be excluded from Git and not committed
-2. In Streamlit Community Cloud, create a new app from your GitHub repository.
-3. Select the `main` branch for deployment.
-4. Set the app entry point to `app.py`.
-5. Use Python `3.12` for the app environment.
-6. Confirm the app launches and displays the Cardiff map with sample sites and dashboard metrics.
+Deploy this app to Streamlit Community Cloud from GitHub.
 
-## Deployment checklist
+- GitHub repo: `FideleA/AIRIS-PoC-V1`
+- Branch: `main`
+- App entry point: `app.py`
+- Python version: `3.12`
 
-- [ ] Repository pushed to GitHub
-- [ ] `main` branch selected in Streamlit Cloud
-- [ ] App entry point set to `app.py`
-- [ ] Python version set to `3.12`
-- [ ] `requirements.txt` present and compatible
-- [ ] `data/stations.csv` present
-- [ ] `.streamlit/config.toml` present
-- [ ] No secrets or credentials in source code
-- [ ] No local absolute paths in code
-- [ ] Tests pass locally
-- [ ] App starts successfully
+Required repository files:
+
+- `app.py`
+- `requirements.txt`
+- `README.md`
+- `data/stations.csv`
+- `.streamlit/config.toml`
+
+Important:
+
+- Do not commit `.streamlit/secrets.toml`
+- Ensure no local absolute paths remain in code
+- Verify the Cardiff map and dashboard metrics load successfully
+
+## Notes
+
+- `data/stations.csv` contains sample PoC site data only.
+- Weather is fetched from Open-Meteo.
+- Map tiles are provided by OpenStreetMap contributors.

@@ -1,0 +1,11 @@
+station_id,station_name,latitude,longitude,flood_score,deprivation_score,source,notes
+S1,Sample Station 1 (PoC),51.4830,-3.1790,70,40,sample PoC data,Demonstrative only
+S2,Sample Station 2 (PoC),51.4825,-3.1750,30,50,sample PoC data,Demonstrative only
+S3,Sample Station 3 (PoC),51.4800,-3.1805,55,60,sample PoC data,Demonstrative only
+S4,Sample Station 4 (PoC),51.4870,-3.1780,80,30,sample PoC data,Demonstrative only
+S5,Sample Station 5 (PoC),51.4790,-3.1760,20,70,sample PoC data,Demonstrative only
+S6,Sample Station 6 (PoC),51.4850,-3.1820,65,45,sample PoC data,Demonstrative only
+S7,Sample Station 7 (PoC),51.4760,-3.1830,40,55,sample PoC data,Demonstrative only
+S8,Sample Station 8 (PoC),51.4810,-3.1700,50,35,sample PoC data,Demonstrative only
+S9,Sample Station 9 (PoC),51.4890,-3.1850,90,20,sample PoC data,Demonstrative only
+S10,Sample Station 10 (PoC),51.4780,-3.1715,10,80,sample PoC data,Demonstrative only
