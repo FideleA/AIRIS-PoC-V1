@@ -1,0 +1,27 @@
+{
+  "ambiguity_rule": "nearest interior representative point; exact distance ties use lsoa_code",
+  "ambiguous_match_count": 0,
+  "analysis_crs": "EPSG:27700",
+  "boundary_candidate_tolerance_metres": 0.1,
+  "deprivation_score_maximum": 62.1,
+  "deprivation_score_mean": 19.130303030303033,
+  "deprivation_score_median": 15.3,
+  "deprivation_score_minimum": 4.5,
+  "duplicate_station_id_count": 0,
+  "enrichment_timestamp": "2026-07-20T21:45:15.935639+00:00",
+  "matched_count": 66,
+  "missing_wimd_percentage_count": 0,
+  "output_checksums": {
+    "cardiff_charging_sites_deprivation_unresolved.csv": "1ED46CAE81A690878F69E816772270A64AA0EFB797125E8107CA0B3BDC1A1E46",
+    "cardiff_charging_sites_flood_deprivation_enriched.csv": "EF890F53233A4D7643D83B1435EC454D34E41E6B664BBBF43FE6BC648A081285"
+  },
+  "output_record_count": 66,
+  "provenance_complete_count": 66,
+  "provenance_incomplete_count": 0,
+  "score_rule": "deprivation_score equals the source income_deprivation_percentage without rescaling",
+  "total_input_chargers": 66,
+  "unique_lsoa_count": 43,
+  "unmatched_count": 0,
+  "unresolved_count": 0,
+  "valid_coordinate_count": 66
+}

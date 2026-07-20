@@ -1,0 +1,123 @@
+{
+  "build_timestamp": "2026-07-20T21:48:46.021699+00:00",
+  "dataset_version": "AIRIS_CARDIFF_VERIFIED_FRAW2026_WIMD2025_V1",
+  "deprivation_score_statistics": {
+    "maximum": 62.1,
+    "mean": 19.13030303030303,
+    "median": 15.3,
+    "minimum": 4.5
+  },
+  "dominant_hazard_distribution": {
+    "No mapped Low, Medium or High classification matched.": 45,
+    "river": 5,
+    "river|sea": 8,
+    "river|surface_water": 1,
+    "sea": 4,
+    "sea|surface_water": 2,
+    "surface_water": 1
+  },
+  "duplicate_summary": {
+    "duplicate_station_id_values": 0,
+    "records_with_duplicate_station_id": 0
+  },
+  "flood_band_distribution": {
+    "river": {
+      "Low": 12,
+      "Medium": 2,
+      "No mapped Low, Medium or High classification matched.": 52
+    },
+    "sea": {
+      "Low": 14,
+      "Medium": 1,
+      "No mapped Low, Medium or High classification matched.": 51
+    },
+    "surface_water": {
+      "High": 1,
+      "Low": 3,
+      "No mapped Low, Medium or High classification matched.": 62
+    }
+  },
+  "missing_data_summary": {
+    "access_type": 0,
+    "address": 0,
+    "attribution": 0,
+    "boundary_status": 0,
+    "data_provider": 0,
+    "dataset_version": 0,
+    "deprivation_match_status": 0,
+    "deprivation_score": 0,
+    "enrichment_timestamp": 0,
+    "flood_dominant_source": 0,
+    "flood_match_count": 0,
+    "flood_river_band": 0,
+    "flood_river_score": 0,
+    "flood_score": 0,
+    "flood_sea_band": 0,
+    "flood_sea_score": 0,
+    "flood_surface_water_band": 0,
+    "flood_surface_water_score": 0,
+    "income_deprivation_percentage": 0,
+    "latitude": 0,
+    "licence": 0,
+    "longitude": 0,
+    "lsoa_code": 0,
+    "lsoa_name": 0,
+    "maximum_power_kw": 0,
+    "number_of_connectors": 23,
+    "number_of_evses": 23,
+    "operational_status": 15,
+    "operator_name": 0,
+    "postcode": 0,
+    "source_last_updated": 0,
+    "source_record_id": 0,
+    "source_url": 0,
+    "station_id": 0,
+    "station_name": 0,
+    "usage_cost": 30,
+    "verification_status": 0
+  },
+  "operational_status_distribution": {
+    "Missing": 15,
+    "operational": 40,
+    "unknown": 11
+  },
+  "operator_distribution": {
+    "(Business Owner at Location)": 1,
+    "BP Pulse (UK)": 11,
+    "Connected Kerb": 9,
+    "Drax Energy Solutions Limited": 2,
+    "Electric Highway (UK)": 2,
+    "Evolt Network (Swarco E.Connect)": 15,
+    "GridServe": 1,
+    "Hubsta": 1,
+    "InstaVolt Ltd": 1,
+    "Nissan UK Dealer Network": 1,
+    "Osprey Charging": 7,
+    "POD Point (UK)": 7,
+    "Roam Charging (UK)": 1,
+    "Tesla (Tesla-only charging)": 2,
+    "Tesla (including non-tesla)": 1,
+    "The GeniePoint Network ( EQUANS EV Solutions )": 2,
+    "Vend Electric": 1,
+    "Zero Carbon World": 1
+  },
+  "output_checksums": {
+    "cardiff_stations_verified.csv": "3179535FEC8C83628330CD53425738DCD737AB8D2FCA6D763AB96CA931A40C2B",
+    "cardiff_stations_verified_unresolved.csv": "A6B74498079D6E598002EDE85AEECBB0735FC76A53E8A373C74CA655006631BD",
+    "cardiff_verified_dataset_review.md": "EABE439892388BD2B454DD99D6183444A11AF78E02E2DE8A112EA77F20E02811"
+  },
+  "provenance_completeness": {
+    "complete_count": 66,
+    "incomplete_count": 0
+  },
+  "source_recency_summary": {
+    "earliest": "2015-05-27T11:43:00+00:00",
+    "latest": "2025-10-14T08:54:00+00:00",
+    "missing_or_invalid": 0,
+    "old_before": "2021-07-20",
+    "old_record_count": 20
+  },
+  "source_record_count": 66,
+  "unresolved_count": 0,
+  "usable_verified_count": 66
+}

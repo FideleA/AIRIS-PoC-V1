@@ -43,6 +43,10 @@ data/raw/**/*.tif
 data/raw/**/*.tiff
 data/raw/**/*.parquet
 
+# Reproducible raw WIMD exports
+data/raw/deprivation/wimd_2025_income_employment_indicators.csv
+data/raw/deprivation/wimd_2025_income_ranks_reference.csv
+
 # Reproducible untouched API responses
 data/raw/charging/open_charge_map_cardiff_raw.json
 
@@ -55,3 +59,13 @@ data/raw/charging/open_charge_map_cardiff_raw.json
 data/processed/**/.tmp/
 data/processed/**/*_tmp.*
 data/processed/**/*.partial
+
+# Reproducible processed geospatial intermediates
+data/processed/flood_rivers.gpkg
+data/processed/flood_sea.gpkg
+data/processed/flood_surface_water.gpkg
+data/processed/cardiff_lsoa_income_deprivation.gpkg
+
+# Reproducible staged-enrichment intermediates
+data/processed/cardiff_charging_sites_flood_enriched.csv
+data/processed/cardiff_charging_sites_flood_deprivation_enriched.csv
