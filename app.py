@@ -76,6 +76,16 @@ def format_score(value: Optional[float]) -> str:
         return "N/A"
 
 
+def describe_score_change(current_score: float, forecast_score: float) -> str:
+    """Return the existing user-facing description for a forecast score change."""
+    delta = round(float(forecast_score) - float(current_score), 1)
+    if abs(delta) < 1e-9:
+        return "No change"
+    if delta > 0:
+        return f"Increase: +{delta:.1f} points"
+    return f"Decrease: {delta:.1f} points"
+
+
 def build_contribution_chart(contrib_df: pd.DataFrame) -> alt.Chart:
     return alt.Chart(contrib_df).mark_bar().encode(
         x=alt.X('contribution:Q', axis=alt.Axis(title=None)),
@@ -241,13 +251,10 @@ def main():
                     # show numeric delta as arrow only when non-zero
                     if abs(delta) < 1e-9:
                         mfcast.metric("Forecast score", format_score(fcast['overall_score']))
-                        mfcast.write("No change")
+                        mfcast.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                     else:
                         mfcast.metric("Forecast score", format_score(fcast['overall_score']), delta=delta)
-                        if delta > 0:
-                            mfcast.write(f"Increase: +{delta:.1f} points")
-                        else:
-                            mfcast.write(f"Decrease: {delta:.1f} points")
+                        mfcast.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                 else:
                     mfcast.metric("Forecast score", "N/A")
                 # traceability cue
@@ -309,13 +316,10 @@ def main():
                 delta = round(fcast['overall_score'] - cur['overall_score'], 1)
                 if abs(delta) < 1e-9:
                     pc2.metric('Forecast score', format_score(fcast['overall_score']))
-                    pc2.write('No change')
+                    pc2.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                 else:
                     pc2.metric('Forecast score', format_score(fcast['overall_score']), delta=delta)
-                    if delta > 0:
-                        pc2.write(f"Increase: +{delta:.1f} points")
-                    else:
-                        pc2.write(f"Decrease: {delta:.1f} points")
+                    pc2.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                 if weather and weather.get('retrieved_at'):
                     st.write(f"Calculated using model {MODEL_VERSION} and weather retrieved at {weather['retrieved_at']}.")
                 st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
