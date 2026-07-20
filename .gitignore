@@ -1,8 +1,71 @@
+# Python virtual environments
 .venv/
+.venv-python314-backup/
+
+# Python caches
 __pycache__/
-*.pyc
-.vscode/
+*.py[cod]
+.pytest_cache/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Environment files
 .env
-.streamlit/
-!.streamlit/config.toml
-.ipynb_checkpoints/
+.env.*
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Windows files
+Thumbs.db
+Desktop.ini
+
+# Downloaded source archives
+data/raw/**/*.zip
+data/raw/**/*.tar
+data/raw/**/*.tar.gz
+data/raw/**/*.tgz
+data/raw/**/*.7z
+
+# Temporary extraction directories
+data/raw/**/extracted/
+data/raw/**/.extract_tmp/
+data/raw/**/extract_tmp/
+
+# Large raw geospatial files
+data/raw/**/*.gpkg
+data/raw/**/*.shp
+data/raw/**/*.shx
+data/raw/**/*.dbf
+data/raw/**/*.tif
+data/raw/**/*.tiff
+data/raw/**/*.parquet
+
+# Reproducible raw WIMD exports
+data/raw/deprivation/wimd_2025_income_employment_indicators.csv
+data/raw/deprivation/wimd_2025_income_ranks_reference.csv
+
+# Reproducible untouched API responses
+data/raw/charging/open_charge_map_cardiff_raw.json
+
+# GeoPackage journals and sidecars
+*.gpkg-journal
+*.gpkg-wal
+*.gpkg-shm
+
+# Temporary processing outputs
+data/processed/**/.tmp/
+data/processed/**/*_tmp.*
+data/processed/**/*.partial
+
+# Reproducible processed geospatial intermediates
+data/processed/flood_rivers.gpkg
+data/processed/flood_sea.gpkg
+data/processed/flood_surface_water.gpkg
+data/processed/cardiff_lsoa_income_deprivation.gpkg
+
+# Reproducible staged-enrichment intermediates
+data/processed/cardiff_charging_sites_flood_enriched.csv
+data/processed/cardiff_charging_sites_flood_deprivation_enriched.csv

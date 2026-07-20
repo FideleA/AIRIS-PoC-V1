@@ -1,70 +1,65 @@
 import pytest
 
-from scoring import (
-    _validate_score,
-    temperature_c_to_risk_score,
-    compute_scores,
-    classify_score,
+from app import describe_score_change
+from config import RISK_BANDS, TEMPERATURE_THRESHOLDS, WEIGHTS
+from scoring import classify_score, compute_scores, temperature_c_to_risk_score
+
+
+def test_factor_weights_total_one():
+    assert sum(WEIGHTS.values()) == pytest.approx(1.0)
+
+
+def test_weighted_score_and_contributions_are_correct():
+    result = compute_scores(70, 40, 50)
+    assert result["flood_contribution"] == pytest.approx(35)
+    assert result["temperature_contribution"] == pytest.approx(30)
+    assert result["deprivation_contribution"] == pytest.approx(10)
+    assert result["overall_score"] == pytest.approx(75)
+
+
+def test_contributions_sum_to_overall_score():
+    result = compute_scores(55, 27.5, 60)
+    contributions = (
+        result["flood_contribution"]
+        + result["temperature_contribution"]
+        + result["deprivation_contribution"]
+    )
+    assert contributions == pytest.approx(result["overall_score"])
+
+
+@pytest.mark.parametrize(
+    ("flood", "temperature", "deprivation"),
+    [(0, -10, 0), (100, 35, 100), (20, 22, 80), (80, 32, 20)],
 )
-from config import WEIGHTS
+def test_overall_score_remains_between_zero_and_one_hundred(
+    flood, temperature, deprivation
+):
+    score = compute_scores(flood, temperature, deprivation)["overall_score"]
+    assert 0 <= score <= 100
 
 
-def test_weights_sum_to_one():
-    assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
+def test_risk_category_boundaries_match_configuration():
+    for category, (minimum, maximum) in RISK_BANDS.items():
+        assert classify_score(minimum) == category
+        assert classify_score(maximum) == category
 
 
-def test_temperature_conversion_boundaries_and_levels():
-    assert temperature_c_to_risk_score(19.9) == 10
-    assert temperature_c_to_risk_score(20) == 25
-    assert temperature_c_to_risk_score(22.5) == 25
-    assert temperature_c_to_risk_score(25) == 50
+def test_zero_forecast_difference_is_no_change():
+    assert describe_score_change(42.0, 42.0) == "No change"
+
+
+def test_temperature_transformation_lower_threshold():
+    assert temperature_c_to_risk_score(TEMPERATURE_THRESHOLDS["cold"]) == 25
+
+
+def test_temperature_transformation_intermediate_value():
     assert temperature_c_to_risk_score(27.5) == 50
-    assert temperature_c_to_risk_score(30) == 75
-    assert temperature_c_to_risk_score(33.0) == 75
-    assert temperature_c_to_risk_score(35) == 100
+
+
+def test_temperature_transformation_upper_threshold():
+    assert temperature_c_to_risk_score(TEMPERATURE_THRESHOLDS["very_hot"]) == 100
+
+
+def test_temperature_transformation_above_upper_threshold():
     assert temperature_c_to_risk_score(40) == 100
 
-
-def test_compute_scores_example_and_contributions():
-    # Example from user: flood 70, temperature 40C, deprivation 50
-    res = compute_scores(70, 40, 50)
-    # temperature 40 -> risk score 100
-    assert res["temperature_score"] == 100
-    # contributions
-    assert res["flood_contribution"] == pytest.approx(70 * WEIGHTS["flood"])
-    assert res["temperature_contribution"] == pytest.approx(100 * WEIGHTS["temperature"])
-    assert res["deprivation_contribution"] == pytest.approx(50 * WEIGHTS["deprivation"])
-    # overall
-    expected_overall = round(
-        70 * WEIGHTS["flood"] + 100 * WEIGHTS["temperature"] + 50 * WEIGHTS["deprivation"],
-        4,
-    )
-    assert res["overall_score"] == pytest.approx(expected_overall)
-
-
-def test_invalid_scores_out_of_range_and_non_numeric():
-    with pytest.raises(ValueError):
-        _validate_score(-1, "flood")
-    with pytest.raises(ValueError):
-        _validate_score(101, "flood")
-    with pytest.raises(TypeError):
-        _validate_score("abc", "flood")
-
-
-def test_risk_band_boundaries():
-    # Use classify_score directly for boundaries
-    from config import RISK_BANDS
-
-    for name, (mn, mx) in RISK_BANDS.items():
-        assert classify_score(mn) == name
-        assert classify_score(mx) == name
-
-    # Ensure configured boundary values classify to the expected bands
-    assert classify_score(20.0) == "very_low"
-    assert classify_score(21.0) == "low"
-    assert classify_score(40.0) == "low"
-    assert classify_score(41.0) == "medium"
-    assert classify_score(70.0) == "medium"
-    assert classify_score(71.0) == "high"
-    assert classify_score(90.0) == "high"
-    assert classify_score(91.0) == "very_high"

@@ -1,37 +1,27 @@
-from typing import Dict, Any
 from datetime import datetime, timezone
+from typing import Any, Dict
 
-from config import WEIGHTS, MODEL_VERSION, RISK_BANDS, TEMPERATURE_THRESHOLDS
+from config import MODEL_VERSION, RISK_BANDS, TEMPERATURE_THRESHOLDS, WEIGHTS
 
 
 def _validate_score(value: Any, name: str) -> float:
-    """Validate that a value is numeric and within 0..100. Returns float.
-
-    Raises ValueError for invalid inputs.
-    """
     try:
-        v = float(value)
+        score = float(value)
     except Exception:
         raise TypeError(f"{name} must be numeric (got {type(value).__name__})")
-    if v < 0 or v > 100:
-        raise ValueError(f"{name} must be between 0 and 100 (got {v})")
-    return v
+    if score < 0 or score > 100:
+        raise ValueError(f"{name} must be between 0 and 100 (got {score})")
+    return score
 
 
 def temperature_c_to_risk_score(temp_c: float) -> int:
-    """Convert a maximum temperature in Celsius to a 0-100 illustrative risk score.
-
-    Uses thresholds defined in `config.TEMPERATURE_THRESHOLDS`.
-    Returns one of the illustrative scores: 10,25,50,75,100.
-    """
     if temp_c is None:
         raise TypeError("temperature must be provided")
     try:
-        t = float(temp_c)
+        temperature = float(temp_c)
     except Exception:
         raise TypeError("temperature must be numeric")
-    # sanity check
-    if t < -50 or t > 60:
+    if temperature < -50 or temperature > 60:
         raise ValueError("temperature value appears unrealistic")
 
     cold = TEMPERATURE_THRESHOLDS.get("cold", 20)
@@ -39,25 +29,21 @@ def temperature_c_to_risk_score(temp_c: float) -> int:
     hot = TEMPERATURE_THRESHOLDS.get("hot", 30)
     very_hot = TEMPERATURE_THRESHOLDS.get("very_hot", 35)
 
-    if t < cold:
+    if temperature < cold:
         return 10
-    if t < warm:
+    if temperature < warm:
         return 25
-    if t < hot:
+    if temperature < hot:
         return 50
-    if t < very_hot:
+    if temperature < very_hot:
         return 75
     return 100
 
 
 def classify_score(score: float) -> str:
-    """Return the risk band name for a score using `config.RISK_BANDS`.
-
-    Bands are expected as dict of name -> (min_inclusive, max_inclusive).
-    """
-    s = float(score)
-    for name, (mn, mx) in RISK_BANDS.items():
-        if mn <= s <= mx:
+    numeric_score = float(score)
+    for name, (minimum, maximum) in RISK_BANDS.items():
+        if minimum <= numeric_score <= maximum:
             return name
     return "unknown"
 
@@ -65,42 +51,30 @@ def classify_score(score: float) -> str:
 def compute_scores(
     flood_score: Any, temperature_c: Any, deprivation_score: Any
 ) -> Dict[str, Any]:
-    """Compute factor contributions and overall AIRIS score.
+    flood = _validate_score(flood_score, "flood_score")
+    temperature_score = temperature_c_to_risk_score(temperature_c)
+    deprivation = _validate_score(deprivation_score, "deprivation_score")
 
-    Args:
-        flood_score: flood score [0..100]
-        temperature_c: temperature in Celsius (converted to 0..100 risk)
-        deprivation_score: deprivation score [0..100]
-
-    Returns dict with factor scores, contributions, overall score, risk band,
-    model version and weights used.
-    """
-    f = _validate_score(flood_score, "flood_score")
-    temp_c = temperature_c
-    temp_score = temperature_c_to_risk_score(temp_c)
-    d = _validate_score(deprivation_score, "deprivation_score")
-
-    w_f = WEIGHTS.get("flood", 0.0)
-    w_t = WEIGHTS.get("temperature", 0.0)
-    w_d = WEIGHTS.get("deprivation", 0.0)
-
-    f_contrib = round(f * w_f, 4)
-    t_contrib = round(float(temp_score) * w_t, 4)
-    d_contrib = round(d * w_d, 4)
-
-    overall = round(f_contrib + t_contrib + d_contrib, 4)
-
-    band = classify_score(overall)
+    flood_contribution = round(flood * WEIGHTS.get("flood", 0.0), 4)
+    temperature_contribution = round(
+        float(temperature_score) * WEIGHTS.get("temperature", 0.0), 4
+    )
+    deprivation_contribution = round(
+        deprivation * WEIGHTS.get("deprivation", 0.0), 4
+    )
+    overall = round(
+        flood_contribution + temperature_contribution + deprivation_contribution, 4
+    )
 
     return {
-        "flood_score": f,
-        "temperature_score": temp_score,
-        "deprivation_score": d,
-        "flood_contribution": f_contrib,
-        "temperature_contribution": t_contrib,
-        "deprivation_contribution": d_contrib,
+        "flood_score": flood,
+        "temperature_score": temperature_score,
+        "deprivation_score": deprivation,
+        "flood_contribution": flood_contribution,
+        "temperature_contribution": temperature_contribution,
+        "deprivation_contribution": deprivation_contribution,
         "overall_score": overall,
-        "risk_band": band,
+        "risk_band": classify_score(overall),
         "model_version": MODEL_VERSION,
         "weights": WEIGHTS.copy(),
         "calculated_at": datetime.now(timezone.utc).isoformat(),
