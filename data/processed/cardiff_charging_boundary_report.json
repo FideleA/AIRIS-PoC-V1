@@ -1,0 +1,34 @@
+{
+  "boundary_filter_timestamp": "2026-07-20T17:47:54.131690+00:00",
+  "boundary_filter_version": "1.0.0",
+  "boundary_authority_code": "W06000015",
+  "boundary_authority_name": "Cardiff",
+  "boundary_dataset": "Local Authorities - High Water mark",
+  "evaluation_crs": "EPSG:27700",
+  "total_input_records": 131,
+  "valid_coordinates": 131,
+  "invalid_coordinates": 0,
+  "inside_count": 66,
+  "boundary_count": 0,
+  "outside_count": 65,
+  "invalid_coordinate_count": 0,
+  "duplicate_station_ids": {
+    "count": 0,
+    "values": []
+  },
+  "duplicate_coordinates": {
+    "group_count": 0,
+    "record_count": 0,
+    "values": []
+  },
+  "record_accounting": {
+    "included_records": 66,
+    "outside_review_records": 65,
+    "accounted_records": 131
+  },
+  "output_file_sizes": {
+    "cardiff_charging_sites_csv_bytes": 35527,
+    "outside_boundary_csv_bytes": 34913,
+    "quality_report_json_bytes": 911
+  }
+}
