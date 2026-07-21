@@ -8,12 +8,12 @@
   "deprivation_score_median": 15.3,
   "deprivation_score_minimum": 4.5,
   "duplicate_station_id_count": 0,
-  "enrichment_timestamp": "2026-07-20T21:45:15.935639+00:00",
+  "enrichment_timestamp": "2026-07-20T23:56:44.384644+00:00",
   "matched_count": 66,
   "missing_wimd_percentage_count": 0,
   "output_checksums": {
     "cardiff_charging_sites_deprivation_unresolved.csv": "1ED46CAE81A690878F69E816772270A64AA0EFB797125E8107CA0B3BDC1A1E46",
-    "cardiff_charging_sites_flood_deprivation_enriched.csv": "EF890F53233A4D7643D83B1435EC454D34E41E6B664BBBF43FE6BC648A081285"
+    "cardiff_charging_sites_flood_deprivation_enriched.csv": "2818F38BE6D120C98E75C4BFB0A7EB56B4BA4D85A2460A751B3C9A4305442A8E"
   },
   "output_record_count": 66,
   "provenance_complete_count": 66,

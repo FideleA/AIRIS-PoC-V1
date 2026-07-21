@@ -12,7 +12,7 @@ Required attribution:
 
 ## Risk bands and AIRIS configuration
 
-The source polygons contain only `High`, `Medium`, and `Low`. AIRIS normalises the complete point-matching result set to `Very Low`, `Low`, `Medium`, and `High`. `Very Low` is never constructed as a polygon: it may be inferred later only when a location is outside all published High/Medium/Low polygons for the relevant flood source. NRW guidance describes Very Low as an annual probability below 1 in 1,000; it does not mean no risk.
+The source polygons contain only `High`, `Medium`, and `Low`. AIRIS normalises the complete point-matching result set to `Very Low`, `Low`, `Medium`, and `High`. `Very Low` is never constructed as a polygon: charger enrichment assigns it only when a location is outside all published High/Medium/Low polygons for the relevant flood source. NRW guidance describes Very Low as an annual probability below 1 in 1,000; it does not mean no risk. A no-polygon match must therefore retain the `Very Low` band and illustrative score `10`, never score `0`.
 
 The configurable illustrative AIRIS transformation is:
 

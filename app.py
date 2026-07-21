@@ -3,6 +3,7 @@ import folium
 from streamlit_folium import st_folium
 import pandas as pd
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import altair as alt
 
@@ -19,6 +20,9 @@ from weather_service import fetch_open_meteo, WeatherServiceError
 
 
 st.set_page_config(page_title="AIRIS Cardiff PoC Dashboard", layout="wide")
+
+FORECAST_INCREASE_THRESHOLD = 5.0
+VERIFIED_DATASET_NAME = "AIRIS verified Cardiff charging locations"
 
 
 @st.cache_data
@@ -46,6 +50,7 @@ def attribution_statements(data_mode: str) -> list[str]:
 
 def verified_site_details(station) -> list[tuple[str, object]]:
     fields = [
+        ("Technical station ID", "station_id"),
         ("Operator", "operator_name"),
         ("Operational status", "operational_status"),
         ("Source provider", "data_provider"),
@@ -63,8 +68,51 @@ def verified_site_details(station) -> list[tuple[str, object]]:
     for label, field in fields:
         value = station.get(field)
         if value is not None and not pd.isna(value) and str(value).strip():
+            if field in {"source_last_updated", "enrichment_timestamp"}:
+                value = format_london_timestamp(value)
             details.append((label, value))
     return details
+
+
+def format_london_timestamp(value: object) -> str:
+    """Format an ISO timestamp for concise display in Europe/London."""
+    try:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        local = timestamp.tz_convert(ZoneInfo("Europe/London"))
+    except (TypeError, ValueError, OverflowError):
+        return str(value)
+    return f"{local.day} {local.strftime('%B %Y, %H:%M %Z')}"
+
+
+def station_selector_label(station) -> str:
+    """Return a readable station label without exposing its technical ID."""
+    name = str(station.get("station_name", "Station")).strip() or "Station"
+    operator = station.get("operator_name")
+    postcode = station.get("postcode")
+    if operator is not None and not pd.isna(operator) and str(operator).strip():
+        qualifier = str(operator).strip()
+    elif postcode is not None and not pd.isna(postcode) and str(postcode).strip():
+        qualifier = str(postcode).strip()
+    else:
+        qualifier = ""
+    return f"{name} — {qualifier}" if qualifier else name
+
+
+def score_contributions(score_result: dict) -> dict[str, float]:
+    """Return the exact weighted values shared by charts and overall scoring."""
+    return {
+        "Flood exposure": score_result["flood_contribution"],
+        "Temperature": score_result["temperature_contribution"],
+        "Income deprivation": score_result["deprivation_contribution"],
+    }
+
+
+def forecast_score_increase(current: dict, forecast: dict) -> float:
+    return round(
+        float(forecast["overall_score"]) - float(current["overall_score"]), 1
+    )
 
 
 @st.cache_data(ttl=1800)
@@ -149,7 +197,7 @@ def build_contribution_chart(contrib_df: pd.DataFrame) -> alt.Chart:
 
 
 def format_popup(station, current_res, forecast_res, weather_err=None):
-    lines = [f"<b>{station['station_name']} — {station['station_id']}</b>"]
+    lines = [f"<b>{station_selector_label(station)}</b>"]
     if weather_err:
         lines.append(f"<i>Weather error: {weather_err}</i>")
     if current_res:
@@ -211,8 +259,12 @@ def main():
                     "Public-source and geospatially enriched does not mean guaranteed, "
                     "certified, complete, or fully authoritative."
                 )
-            for statement in attribution_statements(DATA_MODE):
-                st.write(statement)
+                st.write("Open Charge Map")
+                st.write("Natural Resources Wales — Flood Risk Assessment Wales")
+                st.write("Welsh Government / StatsWales — WIMD 2025")
+                st.write("Office for National Statistics and Ordnance Survey")
+            st.write("OpenStreetMap")
+            st.write("Open-Meteo")
 
     # Compute scores for all stations (with graceful handling)
     results = []
@@ -229,7 +281,13 @@ def main():
     avg_current = round(sum(r["current"]["overall_score"] for r in valid_currents) / len(valid_currents), 2) if valid_currents else None
     high_risk_count = sum(1 for r in valid_currents if r["current"]["risk_band"] in ("high", "very_high"))
     # forecast alerts: forecast score > current score by more than 5 points
-    forecast_alerts = sum(1 for r in valid_currents if r["forecast"] and (r["forecast"]["overall_score"] - r["current"]["overall_score"] > 5))
+    forecast_alerts = sum(
+        1
+        for r in valid_currents
+        if r["forecast"]
+        and forecast_score_increase(r["current"], r["forecast"])
+        > FORECAST_INCREASE_THRESHOLD
+    )
 
     # Top metrics
     c1, c2, c3, c4 = st.columns(4)
@@ -244,9 +302,13 @@ def main():
         help=f"High-risk threshold: {RISK_BANDS['high'][0]}+",
     )
     c4.metric(
-        "Forecast alerts",
+        "Sites with forecast score increase >5",
         forecast_alerts,
-        help="Forecast alert rule: forecast overall score exceeds current overall score by more than 5 points",
+        help=(
+            "Count of sites where forecast overall score exceeds current overall "
+            "score by more than 5 points. Forecast scoring uses the maximum "
+            "temperature in the seven-day horizon as a conservative scenario."
+        ),
     )
 
     # Map
@@ -283,9 +345,14 @@ def main():
 
     with sel_col:
         st.header("Selected site")
-        # selector shows "station name — station ID"
-        id_to_name = {r['station_id']: r['row']['station_name'] for r in results}
-        sid = st.selectbox("Select station", options=stations["station_id"].tolist(), format_func=lambda s: f"{id_to_name.get(s, s)} — {s}")
+        station_by_id = {r['station_id']: r['row'] for r in results}
+        sid = st.selectbox(
+            "Select station",
+            options=stations["station_id"].tolist(),
+            format_func=lambda station_id: station_selector_label(
+                station_by_id[station_id]
+            ),
+        )
         sel = next((r for r in results if r["station_id"] == sid), None)
         if sel:
             if sel["error"]:
@@ -300,30 +367,27 @@ def main():
                 # display category beneath current score (no arrow)
                 mcur.write(display_band(cur['risk_band']))
                 if fcast:
-                    delta = round(fcast['overall_score'] - cur['overall_score'], 1)
-                    # show numeric delta as arrow only when non-zero
+                    delta = forecast_score_increase(cur, fcast)
                     if abs(delta) < 1e-9:
                         mfcast.metric("Forecast score", format_score(fcast['overall_score']))
                         mfcast.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                     else:
                         mfcast.metric("Forecast score", format_score(fcast['overall_score']), delta=delta)
-                        mfcast.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                 else:
                     mfcast.metric("Forecast score", "N/A")
                 # traceability cue
                 if weather and weather.get('retrieved_at'):
-                    st.write(f"Calculated using model {MODEL_VERSION} and weather retrieved at {weather['retrieved_at']}.")
+                    st.write(
+                        f"Calculated using model {MODEL_VERSION} and weather retrieved "
+                        f"at {format_london_timestamp(weather['retrieved_at'])}."
+                    )
                 # temperatures
                 if weather and 'current_temperature_c' in weather:
                     st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
                 if weather and 'forecast_max_temperature_c' in weather:
                     st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('seven_day_max_temperature_c'))}")
                 # contribution chart (weighted point contributions)
-                contrib = {
-                    'Flood exposure': cur['flood_contribution'],
-                    'Temperature': cur['temperature_contribution'],
-                    'Income deprivation': cur['deprivation_contribution']
-                }
+                contrib = score_contributions(cur)
                 contrib_df = pd.DataFrame({'factor': list(contrib.keys()), 'contribution': list(contrib.values())})
                 contrib_df = contrib_df.sort_values('contribution', ascending=False)
                 chart = build_contribution_chart(contrib_df)
@@ -334,7 +398,7 @@ def main():
                 ).encode(
                     text=alt.Text('contribution:Q', format='.1f')
                 )
-                st.altair_chart((chart + labels), use_container_width=True)
+                st.altair_chart((chart + labels), width="stretch")
                 st.caption('Weighted contributions sum to the overall score.')
             else:
                 st.write("Current score: N/A")
@@ -342,9 +406,14 @@ def main():
             with st.expander('Assessment details', expanded=False):
                 st.write(f"Data mode: {dataset_mode_label(DATA_MODE)}")
                 if DATA_MODE == "sample":
-                    st.write("Data source: demonstrative PoC station data (data/stations.csv)")
+                    st.write("Dataset: AIRIS demonstrative PoC station data")
                 else:
-                    st.write("Data source: data/processed/cardiff_stations_verified.csv")
+                    st.write(f"Dataset: {VERIFIED_DATASET_NAME}")
+                    st.write(f"Dataset version: {sel['row'].get('dataset_version', 'N/A')}")
+                    st.write(
+                        "Enrichment date: "
+                        f"{format_london_timestamp(sel['row'].get('enrichment_timestamp'))}"
+                    )
                     st.caption(
                         "Public-source data are enriched for this research PoC and are "
                         "not guaranteed, certified, or fully authoritative."
@@ -381,22 +450,20 @@ def main():
                 pc1, pc2 = st.columns(2)
                 pc1.metric('Current score', format_score(cur['overall_score']))
                 pc1.write(display_band(cur['risk_band']))
-                delta = round(fcast['overall_score'] - cur['overall_score'], 1)
+                delta = forecast_score_increase(cur, fcast)
                 if abs(delta) < 1e-9:
                     pc2.metric('Forecast score', format_score(fcast['overall_score']))
                     pc2.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                 else:
                     pc2.metric('Forecast score', format_score(fcast['overall_score']), delta=delta)
-                    pc2.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
                 if weather and weather.get('retrieved_at'):
-                    st.write(f"Calculated using model {MODEL_VERSION} and weather retrieved at {weather['retrieved_at']}.")
+                    st.write(
+                        f"Calculated using model {MODEL_VERSION} and weather retrieved "
+                        f"at {format_london_timestamp(weather['retrieved_at'])}."
+                    )
                 st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
                 st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('seven_day_max_temperature_c'))}")
-                contrib = {
-                    'Flood exposure': cur['flood_contribution'],
-                    'Temperature': cur['temperature_contribution'],
-                    'Income deprivation': cur['deprivation_contribution']
-                }
+                contrib = score_contributions(cur)
                 contrib_df = pd.DataFrame({'factor': list(contrib.keys()), 'contribution': list(contrib.values())})
                 contrib_df = contrib_df.sort_values('contribution', ascending=False)
                 chart = build_contribution_chart(contrib_df)
@@ -407,14 +474,15 @@ def main():
                 ).encode(
                     text=alt.Text('contribution:Q', format='.1f')
                 )
-                st.altair_chart((chart + labels), use_container_width=True)
+                st.altair_chart((chart + labels), width="stretch")
                 st.caption('Weighted contributions sum to the overall score.')
 
     # Footer disclaimer and attribution
     st.markdown("---")
     st.caption("This is an illustrative research PoC. It does not predict claims, calculate premiums or automate underwriting.")
-    for statement in attribution_statements(DATA_MODE):
-        st.caption(statement)
+    with st.expander("Data attribution and licences"):
+        for statement in attribution_statements(DATA_MODE):
+            st.caption(statement)
 
 
 if __name__ == '__main__':

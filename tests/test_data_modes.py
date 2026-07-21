@@ -6,7 +6,15 @@ import pandas as pd
 import pytest
 
 import app
-from app import attribution_statements, dataset_mode_label, verified_site_details
+from app import (
+    attribution_statements,
+    dataset_mode_label,
+    forecast_score_increase,
+    format_london_timestamp,
+    score_contributions,
+    station_selector_label,
+    verified_site_details,
+)
 from config import (
     MAP_ATTRIBUTION,
     NRW_ATTRIBUTION,
@@ -92,6 +100,22 @@ def test_verified_factors_are_used_unchanged_in_existing_scoring():
     )
 
 
+def test_very_low_flood_score_contribution_chart_and_overall_are_consistent():
+    result = compute_scores(10, 20, 0)
+    contributions = score_contributions(result)
+
+    assert result["flood_score"] == 10
+    assert result["flood_contribution"] == pytest.approx(5.0)
+    assert contributions["Flood exposure"] == pytest.approx(5.0)
+    assert sum(contributions.values()) == pytest.approx(result["overall_score"])
+
+
+def test_forecast_increase_helper_uses_overall_scores():
+    assert forecast_score_increase(
+        {"overall_score": 20.0}, {"overall_score": 25.1}
+    ) == pytest.approx(5.1)
+
+
 def test_dashboard_forecast_uses_seven_day_maximum(monkeypatch):
     station = load_stations(mode="verified").iloc[0]
     monkeypatch.setattr(
@@ -143,3 +167,31 @@ def test_verified_site_details_include_available_traceability_fields():
         "Dominant flood source", "LSOA", "Income-deprivation percentage",
         "Enrichment timestamp", "Dataset version",
     }.issubset(labels)
+
+
+def test_station_selector_prefers_operator_then_postcode_without_station_id():
+    station = {
+        "station_id": "airis_internal",
+        "station_name": "Park Place",
+        "operator_name": "Osprey Charging",
+        "postcode": "CF10 3RL",
+    }
+    assert station_selector_label(station) == "Park Place — Osprey Charging"
+    station["operator_name"] = ""
+    assert station_selector_label(station) == "Park Place — CF10 3RL"
+    assert "airis_internal" not in station_selector_label(station)
+
+
+def test_utc_timestamp_is_displayed_in_europe_london():
+    assert format_london_timestamp("2026-07-20T23:36:00Z") == (
+        "21 July 2026, 00:36 BST"
+    )
+
+
+def test_dashboard_copy_uses_explicit_alert_rule_and_hides_internal_data_paths():
+    source = Path(app.__file__).read_text(encoding="utf-8")
+    assert "Sites with forecast score increase >5" in source
+    assert "Forecast alerts" not in source
+    assert "data/processed/cardiff_stations_verified.csv" not in source
+    assert "data/stations.csv" not in source
+    assert source.count('for statement in attribution_statements(DATA_MODE)') == 1

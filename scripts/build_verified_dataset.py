@@ -18,7 +18,7 @@ DEFAULT_UNRESOLVED = PROJECT_ROOT / "data/processed/cardiff_stations_verified_un
 DEFAULT_REPORT = PROJECT_ROOT / "data/processed/cardiff_verified_dataset_report.json"
 DEFAULT_REVIEW = PROJECT_ROOT / "data/metadata/cardiff_verified_dataset_review.md"
 
-DATASET_VERSION = "AIRIS_CARDIFF_VERIFIED_FRAW2026_WIMD2025_V1"
+DATASET_VERSION = "AIRIS_CARDIFF_VERIFIED_FRAW2026_WIMD2025_V1_1"
 BUILD_REFERENCE_DATE = pd.Timestamp("2026-07-20T00:00:00Z")
 OLD_SOURCE_CUTOFF = BUILD_REFERENCE_DATE - pd.DateOffset(years=5)
 CARDIFF_LATITUDE_RANGE = (51.3, 51.7)

@@ -39,7 +39,7 @@ def record(station_id="station-1", **changes):
         "source_url": "https://example.test/1", "source_last_updated": "2025-01-01T00:00:00Z",
         "licence": "licence", "attribution": "attribution", "verification_status": "unreviewed",
         "boundary_status": "inside", "flood_river_band": "Low", "flood_river_score": 35,
-        "flood_sea_band": "No mapped Low, Medium or High classification matched.", "flood_sea_score": 0,
+        "flood_sea_band": "Very Low", "flood_sea_score": 10,
         "flood_surface_water_band": "Medium", "flood_surface_water_score": 65,
         "flood_score": 65, "flood_dominant_source": "surface_water", "flood_match_count": 2,
         "flood_enrichment_status": "enriched", "flood_data_version": "FRAW 2026",

@@ -9,6 +9,7 @@ from shapely.geometry import MultiPolygon, box
 
 from scripts.enrich_chargers_with_flood import (
     NO_MATCH_TEXT,
+    VERY_LOW_BAND,
     enrich_chargers,
     write_outputs,
 )
@@ -81,17 +82,21 @@ def layers(river=None, sea=None, surface=None):
     }
 
 
-def test_site_outside_every_polygon_scores_zero_without_no_risk_claim():
+def test_site_outside_every_polygon_is_very_low_without_no_risk_claim():
     enriched, unresolved, report = enrich_chargers(
         chargers((51.5, -3.2)), layers(), TIMESTAMP
     )
     row = enriched.iloc[0]
-    assert row["flood_score"] == 0
-    assert row["flood_river_band"] == NO_MATCH_TEXT
-    assert row["flood_dominant_source"] == NO_MATCH_TEXT
-    assert "no flood risk" not in row["flood_dominant_source"].lower()
+    assert row["flood_score"] == 10
+    assert row["flood_river_band"] == VERY_LOW_BAND
+    assert row["flood_sea_band"] == VERY_LOW_BAND
+    assert row["flood_surface_water_band"] == VERY_LOW_BAND
+    assert row["flood_dominant_source"] == "river|sea|surface_water"
+    assert "no flood risk" not in report["no_match_interpretation"].lower()
     assert unresolved.empty
     assert report["no_match_count"] == 1
+    assert report["no_match_band"] == VERY_LOW_BAND
+    assert report["no_match_score"] == 10
 
 
 @pytest.mark.parametrize(

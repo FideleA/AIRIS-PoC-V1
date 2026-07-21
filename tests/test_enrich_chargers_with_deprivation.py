@@ -18,9 +18,9 @@ from scripts.enrich_chargers_with_deprivation import (
 TIMESTAMP = "2026-07-20T12:00:00+00:00"
 FLOOD_FIELDS = {
     "flood_river_band": "Low", "flood_river_score": 35,
-    "flood_river_match_count": 1, "flood_sea_band": "No mapped",
-    "flood_sea_score": 0, "flood_sea_match_count": 0,
-    "flood_surface_water_band": "No mapped", "flood_surface_water_score": 0,
+    "flood_river_match_count": 1, "flood_sea_band": "Very Low",
+    "flood_sea_score": 10, "flood_sea_match_count": 0,
+    "flood_surface_water_band": "Very Low", "flood_surface_water_score": 10,
     "flood_surface_water_match_count": 0, "flood_match_count": 1,
     "flood_score": 35, "flood_dominant_source": "river",
     "flood_data_version": "FRAW test version",

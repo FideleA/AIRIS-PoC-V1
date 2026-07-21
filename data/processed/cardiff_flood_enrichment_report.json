@@ -4,34 +4,36 @@
     "river": {
       "Low": 12,
       "Medium": 2,
-      "No mapped Low, Medium or High classification matched.": 52
+      "Very Low": 52
     },
     "sea": {
       "Low": 14,
       "Medium": 1,
-      "No mapped Low, Medium or High classification matched.": 51
+      "Very Low": 51
     },
     "surface_water": {
       "High": 1,
       "Low": 3,
-      "No mapped Low, Medium or High classification matched.": 62
+      "Very Low": 62
     }
   },
   "dominant_source_distribution": {
-    "No mapped Low, Medium or High classification matched.": 45,
     "river": 5,
     "river|sea": 8,
+    "river|sea|surface_water": 45,
     "river|surface_water": 1,
     "sea": 4,
     "sea|surface_water": 2,
     "surface_water": 1
   },
   "enriched_count": 66,
-  "enrichment_timestamp": "2026-07-20T19:20:50.001880+00:00",
+  "enrichment_timestamp": "2026-07-20T23:56:43.347472+00:00",
   "flood_data_version": "FRAW catalogue 2026-05-21 | river layer 2026-05-21 sha256:5E26DD370C446C48BC69F7CAC19FC71633F771E4C04B53A55AD8F2C48DF06CF2 | sea layer 2026-05-21 sha256:125999A7F1C4C46F281B03F2B2E98985BFBE88BA8F61424132FAA364F3E7DFFA | surface_water layer 2022-11-28 sha256:432444DC177277C9CEF467E24A798224C27E053904B5AA471B7604646204D22D",
   "input_count": 66,
+  "no_match_band": "Very Low",
   "no_match_count": 45,
   "no_match_interpretation": "No mapped Low, Medium or High classification matched.",
+  "no_match_score": 10,
   "output_record_count": 66,
   "overlapping_hazard_count": 12,
   "score_method": "Maximum illustrative AIRIS score across matched FRAW hazard sources; these are not official NRW scores.",

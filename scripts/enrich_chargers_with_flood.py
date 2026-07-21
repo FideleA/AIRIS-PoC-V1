@@ -55,6 +55,7 @@ FLOOD_INPUTS = {
 
 HAZARD_SOURCES = ("river", "sea", "surface_water")
 RISK_RANK = {"Low": 1, "Medium": 2, "High": 3}
+VERY_LOW_BAND = "Very Low"
 NO_MATCH_TEXT = "No mapped Low, Medium or High classification matched."
 REQUIRED_CHARGER_FIELDS = {"station_id", "latitude", "longitude"}
 REQUIRED_FLOOD_FIELDS = {
@@ -159,7 +160,12 @@ def _match_one_source(
     except Exception as exc:
         return "", 0, 0, f"spatial matching failed: {type(exc).__name__}"
     if matches.empty:
-        return NO_MATCH_TEXT, 0, 0, None
+        return (
+            VERY_LOW_BAND,
+            ILLUSTRATIVE_AIRIS_RISK_SCORES[VERY_LOW_BAND],
+            0,
+            None,
+        )
 
     raw_bands = matches["risk_band"] if "risk_band" in matches.columns else pd.Series(dtype="object")
     if raw_bands.empty or raw_bands.isna().any() or raw_bands.astype("string").str.strip().eq("").any():
@@ -243,14 +249,11 @@ def enrich_chargers(
         if valid:
             maximum = max(source_scores.values(), default=0)
             row["flood_score"] = maximum
-            if maximum == 0:
-                row["flood_dominant_source"] = NO_MATCH_TEXT
-            else:
-                row["flood_dominant_source"] = "|".join(
-                    source
-                    for source in HAZARD_SOURCES
-                    if source_scores[source] == maximum
-                )
+            row["flood_dominant_source"] = "|".join(
+                source
+                for source in HAZARD_SOURCES
+                if source_scores[source] == maximum
+            )
         else:
             row["flood_score"] = None
             row["flood_dominant_source"] = ""
@@ -285,9 +288,9 @@ def enrich_chargers(
         "unresolved_count": len(unresolved),
         "no_match_count": int(
             (
-                resolved["flood_river_band"].eq(NO_MATCH_TEXT)
-                & resolved["flood_sea_band"].eq(NO_MATCH_TEXT)
-                & resolved["flood_surface_water_band"].eq(NO_MATCH_TEXT)
+                resolved["flood_river_band"].eq(VERY_LOW_BAND)
+                & resolved["flood_sea_band"].eq(VERY_LOW_BAND)
+                & resolved["flood_surface_water_band"].eq(VERY_LOW_BAND)
             ).sum()
         ),
         "distribution_by_hazard_and_band": hazard_distribution,
@@ -307,6 +310,8 @@ def enrich_chargers(
         "flood_data_version": version,
         "enrichment_timestamp": timestamp,
         "no_match_interpretation": NO_MATCH_TEXT,
+        "no_match_band": VERY_LOW_BAND,
+        "no_match_score": ILLUSTRATIVE_AIRIS_RISK_SCORES[VERY_LOW_BAND],
         "score_method": (
             "Maximum illustrative AIRIS score across matched FRAW hazard "
             "sources; these are not official NRW scores."

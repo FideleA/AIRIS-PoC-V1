@@ -1,5 +1,14 @@
 # Cardiff flood-enrichment quality review
 
+> **Post-deployment correction, 21 July 2026:** This document preserves the
+> original pre-dashboard quality review as an audit record. Its references to
+> “No mapped match” and flood score `0` describe the defect found after release.
+> The corrected pipeline classifies those same 45 all-hazard no-match sites as
+> `Very Low` with illustrative AIRIS flood score `10`. No NRW polygon match or
+> source record changed. Current distributions and checksums are recorded in
+> `cardiff_flood_enrichment_report.json` and
+> `cardiff_verified_dataset_report.json`.
+
 Review date: 2026-07-20
 
 ## Scope and outcome

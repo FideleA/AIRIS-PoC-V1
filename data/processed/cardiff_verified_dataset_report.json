@@ -1,6 +1,6 @@
 {
-  "build_timestamp": "2026-07-20T21:48:46.021699+00:00",
-  "dataset_version": "AIRIS_CARDIFF_VERIFIED_FRAW2026_WIMD2025_V1",
+  "build_timestamp": "2026-07-20T23:59:03.896959+00:00",
+  "dataset_version": "AIRIS_CARDIFF_VERIFIED_FRAW2026_WIMD2025_V1_1",
   "deprivation_score_statistics": {
     "maximum": 62.1,
     "mean": 19.13030303030303,
@@ -8,9 +8,9 @@
     "minimum": 4.5
   },
   "dominant_hazard_distribution": {
-    "No mapped Low, Medium or High classification matched.": 45,
     "river": 5,
     "river|sea": 8,
+    "river|sea|surface_water": 45,
     "river|surface_water": 1,
     "sea": 4,
     "sea|surface_water": 2,
@@ -24,17 +24,17 @@
     "river": {
       "Low": 12,
       "Medium": 2,
-      "No mapped Low, Medium or High classification matched.": 52
+      "Very Low": 52
     },
     "sea": {
       "Low": 14,
       "Medium": 1,
-      "No mapped Low, Medium or High classification matched.": 51
+      "Very Low": 51
     },
     "surface_water": {
       "High": 1,
       "Low": 3,
-      "No mapped Low, Medium or High classification matched.": 62
+      "Very Low": 62
     }
   },
   "missing_data_summary": {
@@ -102,9 +102,9 @@
     "Zero Carbon World": 1
   },
   "output_checksums": {
-    "cardiff_stations_verified.csv": "3179535FEC8C83628330CD53425738DCD737AB8D2FCA6D763AB96CA931A40C2B",
+    "cardiff_stations_verified.csv": "DCF89363BA589F8B8168D6DDCC04EA0E26068E77AB106D96167429D58A753466",
     "cardiff_stations_verified_unresolved.csv": "A6B74498079D6E598002EDE85AEECBB0735FC76A53E8A373C74CA655006631BD",
-    "cardiff_verified_dataset_review.md": "EABE439892388BD2B454DD99D6183444A11AF78E02E2DE8A112EA77F20E02811"
+    "cardiff_verified_dataset_review.md": "7EBDE959AB059DDD930FBA2B2F21759F613924C37010D5A923C018C65022512C"
   },
   "provenance_completeness": {
     "complete_count": 66,
