@@ -1,14 +1,19 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
+import geopandas as gpd
 import pandas as pd
+from datetime import datetime, timezone
+from html import escape
 from typing import Optional
+from uuid import uuid4
 from zoneinfo import ZoneInfo
+from shapely.geometry import Point
 
 import altair as alt
 
 from config import (
-    CARDIFF_CENTER, CARDIFF_ZOOM, MODEL_VERSION, WEIGHTS, RISK_BANDS,
+    BASE_DIR, CARDIFF_CENTER, CARDIFF_ZOOM, MODEL_VERSION, WEIGHTS, RISK_BANDS,
     TEMPERATURE_THRESHOLDS, DATA_MODE, DATA_MODE_LABELS,
     OPEN_CHARGE_MAP_ATTRIBUTION, NRW_ATTRIBUTION, WIMD_ATTRIBUTION,
     ONS_OS_ATTRIBUTION, STATWALES_PROVIDER_STATEMENT, MAP_ATTRIBUTION,
@@ -23,6 +28,14 @@ st.set_page_config(page_title="AIRIS Cardiff PoC Dashboard", layout="wide")
 
 FORECAST_INCREASE_THRESHOLD = 5.0
 VERIFIED_DATASET_NAME = "AIRIS verified Cardiff charging locations"
+CARDIFF_SCENARIO_BOUNDS = {
+    "latitude": (51.3, 51.7),
+    "longitude": (-3.5, -2.9),
+}
+PROPOSAL_STATE_KEY = "airis_proposed_scenarios"
+PROCESSED_SUBMISSIONS_KEY = "airis_processed_proposal_submissions"
+NEXT_SCENARIO_NUMBER_KEY = "airis_next_proposal_number"
+CARDIFF_BOUNDARY_PATH = BASE_DIR / "data" / "processed" / "cardiff_boundary.gpkg"
 
 
 @st.cache_data
@@ -113,6 +126,177 @@ def forecast_score_increase(current: dict, forecast: dict) -> float:
     return round(
         float(forecast["overall_score"]) - float(current["overall_score"]), 1
     )
+
+
+def valid_global_coordinates(latitude: object, longitude: object) -> bool:
+    try:
+        lat, lon = float(latitude), float(longitude)
+    except (TypeError, ValueError):
+        return False
+    return pd.notna(lat) and pd.notna(lon) and -90 <= lat <= 90 and -180 <= lon <= 180
+
+
+@st.cache_resource
+def cardiff_boundary_geometry():
+    """Load the prepared official boundary for scenario warnings."""
+    try:
+        boundary = gpd.read_file(CARDIFF_BOUNDARY_PATH, layer="cardiff_boundary")
+        if boundary.empty or boundary.crs is None:
+            return None
+        return boundary.to_crs("EPSG:4326").geometry.union_all()
+    except Exception:
+        return None
+
+
+def coordinates_within_cardiff(
+    latitude: object,
+    longitude: object,
+    boundary_geometry=None,
+) -> bool:
+    if not valid_global_coordinates(latitude, longitude):
+        return False
+    lat, lon = float(latitude), float(longitude)
+    geometry = (
+        boundary_geometry
+        if boundary_geometry is not None
+        else cardiff_boundary_geometry()
+    )
+    if geometry is not None:
+        return bool(geometry.covers(Point(lon, lat)))
+    return (
+        CARDIFF_SCENARIO_BOUNDS["latitude"][0]
+        <= lat
+        <= CARDIFF_SCENARIO_BOUNDS["latitude"][1]
+        and CARDIFF_SCENARIO_BOUNDS["longitude"][0]
+        <= lon
+        <= CARDIFF_SCENARIO_BOUNDS["longitude"][1]
+    )
+
+
+def next_scenario_number(scenarios: list[dict]) -> int:
+    used = {
+        int(scenario["scenario_id"])
+        for scenario in scenarios
+        if str(scenario.get("scenario_id", "")).isdigit()
+    }
+    return max(used, default=0) + 1
+
+
+def build_scenario_record(
+    scenarios: list[dict],
+    latitude: object,
+    longitude: object,
+    flood_score: object,
+    deprivation_score: object,
+    weather: dict,
+    name: str = "",
+    created_at: str | None = None,
+    scenario_number: int | None = None,
+) -> dict:
+    if not valid_global_coordinates(latitude, longitude):
+        raise ValueError("Latitude must be between -90 and 90 and longitude between -180 and 180.")
+    if weather.get("error"):
+        raise ValueError(str(weather["error"]))
+    number = scenario_number or next_scenario_number(scenarios)
+    default_label = f"Proposed Site {number}"
+    display_name = str(name).strip() or default_label
+    current = compute_scores(flood_score, weather["current_temperature_c"], deprivation_score)
+    forecast = compute_scores(
+        flood_score, weather["seven_day_max_temperature_c"], deprivation_score
+    )
+    return {
+        "scenario_id": str(number),
+        "label": default_label,
+        "name": display_name,
+        "latitude": float(latitude),
+        "longitude": float(longitude),
+        "flood_score": float(flood_score),
+        "deprivation_score": float(deprivation_score),
+        "current_temperature_c": float(weather["current_temperature_c"]),
+        "forecast_temperature_c": float(weather["seven_day_max_temperature_c"]),
+        "current_score": float(current["overall_score"]),
+        "forecast_score": float(forecast["overall_score"]),
+        "current_category": current["risk_band"],
+        "forecast_category": forecast["risk_band"],
+        "created_at": created_at or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def add_scenario_once(
+    scenarios: list[dict],
+    processed_submission_ids: set[str],
+    scenario: dict,
+    submission_id: str,
+) -> bool:
+    """Add one scenario once; a rerun with the same submission ID is ignored."""
+    if submission_id in processed_submission_ids:
+        return False
+    scenarios.append(scenario)
+    processed_submission_ids.add(submission_id)
+    return True
+
+
+def remove_scenario(scenarios: list[dict], scenario_id: str) -> bool:
+    for index, scenario in enumerate(scenarios):
+        if str(scenario.get("scenario_id")) == str(scenario_id):
+            scenarios.pop(index)
+            return True
+    return False
+
+
+def clear_scenarios(scenarios: list[dict]) -> None:
+    scenarios.clear()
+
+
+def scenario_comparison_table(scenarios: list[dict]) -> pd.DataFrame:
+    rows = []
+    for scenario in scenarios:
+        rows.append(
+            {
+                "Site": scenario["name"],
+                "Latitude": round(float(scenario["latitude"]), 6),
+                "Longitude": round(float(scenario["longitude"]), 6),
+                "Current score": round(float(scenario["current_score"]), 1),
+                "Forecast score": round(float(scenario["forecast_score"]), 1),
+                "Change": round(
+                    float(scenario["forecast_score"])
+                    - float(scenario["current_score"]),
+                    1,
+                ),
+                "Current risk": display_band(scenario["current_category"]),
+                "Forecast risk": display_band(scenario["forecast_category"]),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def portfolio_metrics(results: list[dict]) -> dict[str, object]:
+    """Calculate verified/sample portfolio metrics; scenarios are never inputs."""
+    valid = [result for result in results if result["current"] is not None]
+    average = (
+        round(sum(item["current"]["overall_score"] for item in valid) / len(valid), 2)
+        if valid
+        else None
+    )
+    return {
+        "sites_mapped": len(results),
+        "average_current": average,
+        "high_risk_count": sum(
+            1 for item in valid if item["current"]["risk_band"] in ("high", "very_high")
+        ),
+        "forecast_increase_count": sum(
+            1
+            for item in valid
+            if item["forecast"]
+            and forecast_score_increase(item["current"], item["forecast"])
+            > FORECAST_INCREASE_THRESHOLD
+        ),
+    }
+
+
+def truncate_map_label(name: object, limit: int = 36) -> str:
+    text = str(name).strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 @st.cache_data(ttl=1800)
@@ -213,6 +397,97 @@ def format_popup(station, current_res, forecast_res, weather_err=None):
     return "<br>".join(lines)
 
 
+def build_airis_map(
+    results: list[dict],
+    selected_station_id: str | None = None,
+    scenarios: list[dict] | None = None,
+) -> folium.Map:
+    """Build the shared charger and temporary-scenario map."""
+    scenarios = scenarios or []
+    map_object = folium.Map(location=CARDIFF_CENTER, zoom_start=CARDIFF_ZOOM)
+    all_locations = []
+    for result in results:
+        row = result["row"]
+        latitude, longitude = float(row["latitude"]), float(row["longitude"])
+        all_locations.append((latitude, longitude))
+        current = result["current"]
+        band = current["risk_band"] if current else None
+        color = risk_color(band)
+        full_name = str(row["station_name"])
+        folium.CircleMarker(
+            location=(latitude, longitude),
+            radius=6,
+            color=color,
+            fill=True,
+            fill_color=color,
+            tooltip=folium.Tooltip(escape(full_name), sticky=True),
+            popup=folium.Popup(
+                format_popup(
+                    row,
+                    current,
+                    result["forecast"],
+                    result["error"],
+                ),
+                max_width=300,
+            ),
+        ).add_to(map_object)
+        if str(row["station_id"]) == str(selected_station_id):
+            folium.CircleMarker(
+                location=(latitude, longitude),
+                radius=10,
+                color="#111827",
+                weight=3,
+                fill=False,
+                tooltip=folium.Tooltip(
+                    escape(truncate_map_label(full_name)),
+                    permanent=True,
+                    direction="top",
+                    offset=(0, -8),
+                ),
+            ).add_to(map_object)
+
+    for scenario in scenarios:
+        latitude = float(scenario["latitude"])
+        longitude = float(scenario["longitude"])
+        all_locations.append((latitude, longitude))
+        popup_lines = [
+            f"<b>{escape(scenario['label'])}</b>",
+            f"Name: {escape(scenario['name'])}",
+            f"Latitude: {latitude:.6f}",
+            f"Longitude: {longitude:.6f}",
+            f"Current score: {float(scenario['current_score']):.1f}",
+            f"Forecast score: {float(scenario['forecast_score']):.1f}",
+            f"Current risk category: {escape(display_band(scenario['current_category']))}",
+            f"Forecast risk category: {escape(display_band(scenario['forecast_category']))}",
+            f"Manual flood score: {float(scenario['flood_score']):.1f}",
+            f"Manual deprivation score: {float(scenario['deprivation_score']):.1f}",
+            "Flood and deprivation values are manually supplied scenario inputs.",
+        ]
+        folium.Marker(
+            location=(latitude, longitude),
+            tooltip=folium.Tooltip(escape(scenario["label"]), sticky=True),
+            popup=folium.Popup("<br>".join(popup_lines), max_width=340),
+            icon=folium.Icon(color="purple", icon="star", prefix="fa"),
+        ).add_to(map_object)
+
+    if scenarios and all_locations:
+        map_object.fit_bounds(all_locations, padding=(25, 25))
+
+    legend_html = """
+     <div style="position: fixed; bottom: 45px; left: 45px; width:190px;
+                 background:white; border:1px solid #999; padding:7px;
+                 z-index:9999; font-size:12px; line-height:1.45;">
+       <b>Map legend</b><br>
+       <span style="color:green;">●</span><span style="color:orange;">●</span><span style="color:red;">●</span>
+       Verified charger (risk colour)<br>
+       <span style="color:#111827;">◯</span> Selected verified charger<br>
+       <span style="color:#7e22ce;">★</span> Proposed scenario site
+     </div>
+    """
+    map_object.get_root().html.add_child(folium.Element(legend_html))
+    return map_object
+
+
 def compute_site_scores_safe(station):
     lat = station["latitude"]
     lon = station["longitude"]
@@ -238,6 +513,14 @@ def main():
     except ValueError as err:
         st.error(f"Failed to load station data: {err}")
         return
+
+    if PROPOSAL_STATE_KEY not in st.session_state:
+        st.session_state[PROPOSAL_STATE_KEY] = []
+    if PROCESSED_SUBMISSIONS_KEY not in st.session_state:
+        st.session_state[PROCESSED_SUBMISSIONS_KEY] = set()
+    if NEXT_SCENARIO_NUMBER_KEY not in st.session_state:
+        st.session_state[NEXT_SCENARIO_NUMBER_KEY] = 1
+    scenarios = st.session_state[PROPOSAL_STATE_KEY]
 
     # Sidebar simplified
     with st.sidebar:
@@ -275,70 +558,36 @@ def main():
         if err:
             errors.append((row["station_id"], err))
 
-    # Portfolio metrics (exclude stations with missing current score)
-    valid_currents = [r for r in results if r["current"] is not None]
-    sites_mapped = len(results)
-    avg_current = round(sum(r["current"]["overall_score"] for r in valid_currents) / len(valid_currents), 2) if valid_currents else None
-    high_risk_count = sum(1 for r in valid_currents if r["current"]["risk_band"] in ("high", "very_high"))
-    # forecast alerts: forecast score > current score by more than 5 points
-    forecast_alerts = sum(
-        1
-        for r in valid_currents
-        if r["forecast"]
-        and forecast_score_increase(r["current"], r["forecast"])
-        > FORECAST_INCREASE_THRESHOLD
-    )
+    metrics = portfolio_metrics(results)
 
     # Top metrics
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Sites mapped", sites_mapped)
+    metric_columns = st.columns(5 if scenarios else 4)
+    c1, c2, c3, c4 = metric_columns[:4]
+    c1.metric("Sites mapped", metrics["sites_mapped"])
     c2.metric(
         "Average current risk score",
-        format_score(avg_current) if avg_current is not None else "N/A",
+        format_score(metrics["average_current"])
+        if metrics["average_current"] is not None
+        else "N/A",
     )
     c3.metric(
         "High-risk sites",
-        high_risk_count,
+        metrics["high_risk_count"],
         help=f"High-risk threshold: {RISK_BANDS['high'][0]}+",
     )
     c4.metric(
         "Sites with forecast score increase >5",
-        forecast_alerts,
+        metrics["forecast_increase_count"],
         help=(
             "Count of sites where forecast overall score exceeds current overall "
             "score by more than 5 points. Forecast scoring uses the maximum "
             "temperature in the seven-day horizon as a conservative scenario."
         ),
     )
+    if scenarios:
+        metric_columns[4].metric("Proposed scenarios", len(scenarios))
 
-    # Map
-    # default map center/zoom
-    m_center = CARDIFF_CENTER
-    m_zoom = CARDIFF_ZOOM
-    m = folium.Map(location=m_center, zoom_start=m_zoom)
-    for r in results:
-        row = r["row"]
-        cur = r["current"]
-        fcast = r["forecast"]
-        err = r["error"]
-        band = cur["risk_band"] if cur else None
-        color = risk_color(band)
-        popup = format_popup(row, cur, fcast, err)
-        folium.CircleMarker(location=(row["latitude"], row["longitude"]), radius=6, color=color, fill=True, fill_color=color, popup=folium.Popup(popup, max_width=300)).add_to(m)
-    # simple legend (HTML overlay)
-    legend_html = '''
-     <div style="position: fixed; bottom: 50px; left: 50px; width:160px; z-index:9999; font-size:14px;">
-     <b>Risk legend</b><br>
-     <i style="background:green;color:white;padding:2px 6px;border-radius:3px;">&nbsp;</i> Very low<br>
-     <i style="background:lightgreen;color:black;padding:2px 6px;border-radius:3px;">&nbsp;</i> Low<br>
-     <i style="background:orange;color:black;padding:2px 6px;border-radius:3px;">&nbsp;</i> Moderate<br>
-     <i style="background:red;color:white;padding:2px 6px;border-radius:3px;">&nbsp;</i> High<br>
-     <i style="background:darkred;color:white;padding:2px 6px;border-radius:3px;">&nbsp;</i> Very high
-     </div>
-     '''
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-    st_data = st_folium(m, width=700, height=500)
+    map_placeholder = st.empty()
 
     # Right-hand panels: selected site and proposed site
     sel_col, prop_col = st.columns(2)
@@ -433,49 +682,131 @@ def main():
 
     with prop_col:
         st.header("Proposed site")
+        proposal_number = st.session_state[NEXT_SCENARIO_NUMBER_KEY]
+        proposal_label = f"Proposed Site {proposal_number}"
+        proposal_name = st.text_input(
+            "Optional proposed-site name",
+            value=proposal_label,
+            key=f"proposal_name_{proposal_number}",
+        )
         lat = st.number_input("Latitude", value=float(CARDIFF_CENTER[0]))
         lon = st.number_input("Longitude", value=float(CARDIFF_CENTER[1]))
         st.caption("For proposed sites, flood and deprivation scores are manually entered. Arbitrary coordinates are not geospatially matched by this dashboard.")
         pflood = st.slider("Manually entered flood exposure score", 0, 100, 50, help="Illustrative standardised score (0–100)")
         pdep = st.slider("Manually entered income deprivation score", 0, 100, 50, help="Illustrative standardised score (0–100)")
-        if st.button("Assess proposed site"):
-            weather = cached_weather(lat, lon)
-            if weather.get('error'):
-                st.warning(f"Weather error: {weather['error']}")
-                st.write("Cannot calculate forecast score without weather data.")
-            else:
-                cur = compute_scores(pflood, weather['current_temperature_c'], pdep)
-                fcast = compute_scores(pflood, weather['seven_day_max_temperature_c'], pdep)
-                # display same visual format as selected site
-                pc1, pc2 = st.columns(2)
-                pc1.metric('Current score', format_score(cur['overall_score']))
-                pc1.write(display_band(cur['risk_band']))
-                delta = forecast_score_increase(cur, fcast)
-                if abs(delta) < 1e-9:
-                    pc2.metric('Forecast score', format_score(fcast['overall_score']))
-                    pc2.write(describe_score_change(cur['overall_score'], fcast['overall_score']))
-                else:
-                    pc2.metric('Forecast score', format_score(fcast['overall_score']), delta=delta)
-                if weather and weather.get('retrieved_at'):
-                    st.write(
-                        f"Calculated using model {MODEL_VERSION} and weather retrieved "
-                        f"at {format_london_timestamp(weather['retrieved_at'])}."
-                    )
-                st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
-                st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('seven_day_max_temperature_c'))}")
-                contrib = score_contributions(cur)
-                contrib_df = pd.DataFrame({'factor': list(contrib.keys()), 'contribution': list(contrib.values())})
-                contrib_df = contrib_df.sort_values('contribution', ascending=False)
-                chart = build_contribution_chart(contrib_df)
-                labels = chart.mark_text(
-                    align='left',
-                    baseline='middle',
-                    dx=5,
-                ).encode(
-                    text=alt.Text('contribution:Q', format='.1f')
+        if valid_global_coordinates(lat, lon) and not coordinates_within_cardiff(lat, lon):
+            st.warning(
+                "These coordinates are outside the Cardiff scenario bounds. "
+                "They may still be assessed and displayed as a temporary scenario."
+            )
+        if st.button("Assess and add to map", type="primary"):
+            if not valid_global_coordinates(lat, lon):
+                st.error(
+                    "Latitude must be between -90 and 90 and longitude between "
+                    "-180 and 180."
                 )
-                st.altair_chart((chart + labels), width="stretch")
-                st.caption('Weighted contributions sum to the overall score.')
+            else:
+                weather = cached_weather(lat, lon)
+                if weather.get("error"):
+                    st.warning(f"Weather error: {weather['error']}")
+                    st.write(
+                        "The scenario was not added. Previously added scenarios "
+                        "remain available."
+                    )
+                else:
+                    scenario = build_scenario_record(
+                        scenarios,
+                        lat,
+                        lon,
+                        pflood,
+                        pdep,
+                        weather,
+                        name=proposal_name,
+                        scenario_number=proposal_number,
+                    )
+                    added = add_scenario_once(
+                        scenarios,
+                        st.session_state[PROCESSED_SUBMISSIONS_KEY],
+                        scenario,
+                        submission_id=str(uuid4()),
+                    )
+                    if added:
+                        st.session_state[NEXT_SCENARIO_NUMBER_KEY] += 1
+                    st.rerun()
+
+        if scenarios:
+            st.markdown("**Scenario management**")
+            scenario_by_id = {
+                str(scenario["scenario_id"]): scenario for scenario in scenarios
+            }
+            selected_scenario_id = st.selectbox(
+                "Select proposed scenario",
+                options=list(scenario_by_id),
+                format_func=lambda scenario_id: (
+                    f"{scenario_by_id[scenario_id]['label']} — "
+                    f"{scenario_by_id[scenario_id]['name']}"
+                ),
+            )
+            remove_col, clear_col = st.columns(2)
+            if remove_col.button("Remove selected proposed site"):
+                remove_scenario(scenarios, selected_scenario_id)
+                st.rerun()
+            confirm_clear = clear_col.checkbox("Confirm clear all")
+            if clear_col.button("Clear all proposed sites", disabled=not confirm_clear):
+                clear_scenarios(scenarios)
+                st.rerun()
+
+            st.dataframe(
+                scenario_comparison_table(scenarios),
+                hide_index=True,
+                width="stretch",
+            )
+            selected_scenario = scenario_by_id[selected_scenario_id]
+            st.markdown(f"**{selected_scenario['name']} assessment**")
+            pc1, pc2 = st.columns(2)
+            pc1.metric(
+                "Current score",
+                format_score(selected_scenario["current_score"]),
+            )
+            pc1.write(display_band(selected_scenario["current_category"]))
+            scenario_delta = round(
+                selected_scenario["forecast_score"]
+                - selected_scenario["current_score"],
+                1,
+            )
+            if abs(scenario_delta) < 1e-9:
+                pc2.metric(
+                    "Forecast score",
+                    format_score(selected_scenario["forecast_score"]),
+                )
+                pc2.write("No change")
+            else:
+                pc2.metric(
+                    "Forecast score",
+                    format_score(selected_scenario["forecast_score"]),
+                    delta=scenario_delta,
+                )
+            st.write(
+                "Current temperature: "
+                f"{format_temperature(selected_scenario['current_temperature_c'])}"
+            )
+            st.write(
+                "Maximum seven-day forecast temperature: "
+                f"{format_temperature(selected_scenario['forecast_temperature_c'])}"
+            )
+            st.caption(
+                "Flood and income-deprivation scores are manually supplied "
+                "scenario inputs. This temporary scenario is not a verified "
+                "charging location."
+            )
+
+    with map_placeholder.container():
+        st_folium(
+            build_airis_map(results, selected_station_id=sid, scenarios=scenarios),
+            width="100%",
+            height=500,
+            key="airis_shared_map",
+        )
 
     # Footer disclaimer and attribution
     st.markdown("---")
