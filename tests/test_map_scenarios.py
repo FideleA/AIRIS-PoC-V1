@@ -3,16 +3,28 @@ import pytest
 from shapely.geometry import box
 
 from app import (
+    CARDIFF_CENTER,
+    CARDIFF_ZOOM,
+    MAP_CENTER_LAT_KEY,
+    MAP_CENTER_LON_KEY,
+    MAP_COMPONENT_KEY,
+    MAP_INITIALISED_KEY,
+    MAP_ZOOM_KEY,
     add_scenario_once,
     build_airis_map,
     build_scenario_record,
     clear_scenarios,
     coordinates_within_cardiff,
+    initialise_map_state,
     next_scenario_number,
+    contribution_dataframe,
     portfolio_metrics,
     remove_scenario,
+    reset_map_view,
     scenario_comparison_table,
+    scenario_current_contributions,
     truncate_map_label,
+    update_map_view,
     valid_global_coordinates,
 )
 
@@ -225,3 +237,163 @@ def test_proposed_sites_do_not_affect_portfolio_metrics():
     assert temporary_scenarios
     assert after == before
     assert after["sites_mapped"] == 1
+
+
+def test_map_component_key_is_stable_and_not_derived_from_selection_or_mode():
+    assert MAP_COMPONENT_KEY == "airis_shared_map"
+
+
+def test_map_view_persists_returned_center_and_zoom_only_when_changed():
+    state = {}
+    initialise_map_state(state)
+    returned = {
+        "center": {"lat": 51.4925, "lng": -3.205},
+        "zoom": 15,
+        "bounds": {
+            "_southWest": {"lat": 51.47, "lng": -3.23},
+            "_northEast": {"lat": 51.51, "lng": -3.18},
+        },
+    }
+    assert update_map_view(state, returned)
+    assert state[MAP_CENTER_LAT_KEY] == returned["center"]["lat"]
+    assert state[MAP_CENTER_LON_KEY] == returned["center"]["lng"]
+    assert state[MAP_ZOOM_KEY] == 15
+    assert not update_map_view(state, returned)
+
+
+def test_explicit_reset_restores_cardiff_default_view_and_clears_pending_fit():
+    state = {
+        MAP_CENTER_LAT_KEY: 51.6,
+        MAP_CENTER_LON_KEY: -3.4,
+        MAP_ZOOM_KEY: 17,
+        MAP_INITIALISED_KEY: True,
+    }
+    reset_map_view(state)
+    assert state[MAP_CENTER_LAT_KEY] == float(CARDIFF_CENTER[0])
+    assert state[MAP_CENTER_LON_KEY] == float(CARDIFF_CENTER[1])
+    assert state[MAP_ZOOM_KEY] == CARDIFF_ZOOM
+
+
+def test_ordinary_map_rebuild_uses_persisted_view_without_fit_bounds():
+    center = {"lat": 51.4925, "lng": -3.205}
+    rendered = build_airis_map(
+        [charger_result()],
+        selected_station_id="airis_internal",
+        center=center,
+        zoom=16,
+    ).get_root().render()
+    assert "fitBounds(" not in rendered
+    assert "[51.4925, -3.205]" in rendered
+    assert '"zoom": 16' in rendered
+
+
+def test_selected_site_change_does_not_add_fit_bounds():
+    first = charger_result("First", "first")
+    second = charger_result("Second", "second")
+    rendered = build_airis_map(
+        [first, second], selected_station_id="second", zoom=15
+    ).get_root().render()
+    assert "fitBounds(" not in rendered
+    assert "Second" in rendered
+
+
+def test_charger_and_proposal_selection_do_not_change_persisted_view():
+    state = {}
+    initialise_map_state(state)
+    update_map_view(
+        state, {"center": {"lat": 51.4925, "lng": -3.205}, "zoom": 16}
+    )
+    saved_view = dict(state)
+    build_airis_map(
+        [charger_result("First", "first"), charger_result("Second", "second")],
+        selected_station_id="second",
+        scenarios=[scenario()],
+        center={
+            "lat": state[MAP_CENTER_LAT_KEY],
+            "lng": state[MAP_CENTER_LON_KEY],
+        },
+        zoom=state[MAP_ZOOM_KEY],
+    )
+    assert state == saved_view
+
+
+def test_fit_bounds_is_only_added_when_explicitly_requested():
+    rendered = build_airis_map(
+        [charger_result()],
+        fit_bounds_locations=[(51.48, -3.18), (51.7, -3.5)],
+    ).get_root().render()
+    assert "fitBounds(" in rendered
+
+
+def test_map_state_is_initialised_once():
+    state = {}
+    initialise_map_state(state)
+    state[MAP_CENTER_LAT_KEY] = 51.5
+    state[MAP_ZOOM_KEY] = 16
+    initialise_map_state(state)
+    assert state[MAP_CENTER_LAT_KEY] == 51.5
+    assert state[MAP_ZOOM_KEY] == 16
+    assert state[MAP_INITIALISED_KEY]
+
+
+def test_map_view_ignores_floating_point_noise_and_invalid_values():
+    state = {}
+    initialise_map_state(state)
+    returned = {
+        "center": {
+            "lat": CARDIFF_CENTER[0] + 1e-8,
+            "lng": CARDIFF_CENTER[1] - 1e-8,
+        },
+        "zoom": CARDIFF_ZOOM + 1e-8,
+    }
+    assert not update_map_view(state, returned)
+    assert not update_map_view(
+        state, {"center": {"lat": 999, "lng": -3}, "zoom": 99}
+    )
+
+
+def test_scenario_stores_contributions_and_required_factor_values():
+    item = scenario(flood_score=65, deprivation_score=20)
+    required = {
+        "flood_score",
+        "temperature_risk_current",
+        "temperature_risk_forecast",
+        "deprivation_score",
+        "flood_contribution_current",
+        "temperature_contribution_current",
+        "deprivation_contribution_current",
+        "current_overall_score",
+        "forecast_overall_score",
+    }
+    assert required <= item.keys()
+    contributions = scenario_current_contributions(item)
+    assert sum(contributions.values()) == pytest.approx(
+        item["current_overall_score"]
+    )
+
+
+def test_stored_scenario_contribution_data_survive_rerun_and_are_sorted():
+    scenarios = [
+        scenario(flood_score=10, deprivation_score=60),
+        scenario([], flood_score=90, deprivation_score=5),
+    ]
+    first_values = scenario_current_contributions(scenarios[0])
+    persisted = scenarios
+    assert scenario_current_contributions(persisted[0]) == first_values
+    frame = contribution_dataframe(first_values)
+    assert frame["contribution"].tolist() == sorted(
+        frame["contribution"].tolist(), reverse=True
+    )
+    assert frame["factor"].tolist() == [
+        factor
+        for factor, _ in sorted(
+            first_values.items(), key=lambda item: item[1], reverse=True
+        )
+    ]
+
+
+def test_removing_one_scenario_preserves_other_contribution_values():
+    scenarios = [scenario(), scenario([], flood_score=90, deprivation_score=70)]
+    second = scenario_current_contributions(scenarios[1]).copy()
+    assert remove_scenario(scenarios, "1")
+    assert scenario_current_contributions(scenarios[0]) == second

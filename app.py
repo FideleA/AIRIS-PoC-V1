@@ -36,6 +36,12 @@ PROPOSAL_STATE_KEY = "airis_proposed_scenarios"
 PROCESSED_SUBMISSIONS_KEY = "airis_processed_proposal_submissions"
 NEXT_SCENARIO_NUMBER_KEY = "airis_next_proposal_number"
 CARDIFF_BOUNDARY_PATH = BASE_DIR / "data" / "processed" / "cardiff_boundary.gpkg"
+MAP_COMPONENT_KEY = "airis_shared_map"
+MAP_CENTER_LAT_KEY = "map_center_lat"
+MAP_CENTER_LON_KEY = "map_center_lon"
+MAP_ZOOM_KEY = "map_zoom"
+MAP_INITIALISED_KEY = "map_initialised"
+MAP_VIEW_TOLERANCE = 1e-6
 
 
 @st.cache_data
@@ -211,7 +217,18 @@ def build_scenario_record(
         "latitude": float(latitude),
         "longitude": float(longitude),
         "flood_score": float(flood_score),
+        "temperature_risk_current": float(current["temperature_score"]),
+        "temperature_risk_forecast": float(forecast["temperature_score"]),
         "deprivation_score": float(deprivation_score),
+        "flood_contribution_current": float(current["flood_contribution"]),
+        "temperature_contribution_current": float(
+            current["temperature_contribution"]
+        ),
+        "deprivation_contribution_current": float(
+            current["deprivation_contribution"]
+        ),
+        "current_overall_score": float(current["overall_score"]),
+        "forecast_overall_score": float(forecast["overall_score"]),
         "current_temperature_c": float(weather["current_temperature_c"]),
         "forecast_temperature_c": float(weather["seven_day_max_temperature_c"]),
         "current_score": float(current["overall_score"]),
@@ -299,6 +316,58 @@ def truncate_map_label(name: object, limit: int = 36) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def initialise_map_state(state) -> None:
+    if state.get(MAP_INITIALISED_KEY):
+        return
+    state[MAP_CENTER_LAT_KEY] = float(CARDIFF_CENTER[0])
+    state[MAP_CENTER_LON_KEY] = float(CARDIFF_CENTER[1])
+    state[MAP_ZOOM_KEY] = int(CARDIFF_ZOOM)
+    state[MAP_INITIALISED_KEY] = True
+
+
+def reset_map_view(state) -> None:
+    state[MAP_CENTER_LAT_KEY] = float(CARDIFF_CENTER[0])
+    state[MAP_CENTER_LON_KEY] = float(CARDIFF_CENTER[1])
+    state[MAP_ZOOM_KEY] = int(CARDIFF_ZOOM)
+    state[MAP_INITIALISED_KEY] = True
+
+
+def update_map_view(state, returned_map_state: dict | None) -> bool:
+    """Persist a materially changed Leaflet view without causing another rerun."""
+    if not returned_map_state:
+        return False
+    changed = False
+    center = returned_map_state.get("center")
+    if isinstance(center, dict) and {"lat", "lng"} <= center.keys():
+        candidate = {"lat": float(center["lat"]), "lng": float(center["lng"])}
+        if (
+            -90 <= candidate["lat"] <= 90
+            and -180 <= candidate["lng"] <= 180
+            and (
+                abs(candidate["lat"] - float(state[MAP_CENTER_LAT_KEY]))
+                > MAP_VIEW_TOLERANCE
+                or abs(candidate["lng"] - float(state[MAP_CENTER_LON_KEY]))
+                > MAP_VIEW_TOLERANCE
+            )
+        ):
+            state[MAP_CENTER_LAT_KEY] = candidate["lat"]
+            state[MAP_CENTER_LON_KEY] = candidate["lng"]
+            changed = True
+    zoom = returned_map_state.get("zoom")
+    try:
+        candidate_zoom = float(zoom)
+    except (TypeError, ValueError):
+        candidate_zoom = None
+    if (
+        candidate_zoom is not None
+        and 0 <= candidate_zoom <= 22
+        and abs(candidate_zoom - float(state[MAP_ZOOM_KEY])) > MAP_VIEW_TOLERANCE
+    ):
+        state[MAP_ZOOM_KEY] = candidate_zoom
+        changed = True
+    return changed
+
+
 @st.cache_data(ttl=1800)
 def cached_weather(lat: float, lon: float) -> dict:
     try:
@@ -380,6 +449,35 @@ def build_contribution_chart(contrib_df: pd.DataFrame) -> alt.Chart:
     ).properties(title='Contribution to current overall score')
 
 
+def contribution_dataframe(contributions: dict[str, float]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "factor": list(contributions.keys()),
+            "contribution": [float(value) for value in contributions.values()],
+        }
+    ).sort_values("contribution", ascending=False, ignore_index=True)
+
+
+def scenario_current_contributions(scenario: dict) -> dict[str, float]:
+    return {
+        "Flood exposure": float(scenario["flood_contribution_current"]),
+        "Income deprivation": float(scenario["deprivation_contribution_current"]),
+        "Temperature": float(scenario["temperature_contribution_current"]),
+    }
+
+
+def render_contribution_chart(contributions: dict[str, float]) -> None:
+    contrib_df = contribution_dataframe(contributions)
+    chart = build_contribution_chart(contrib_df)
+    labels = chart.mark_text(
+        align="left",
+        baseline="middle",
+        dx=5,
+    ).encode(text=alt.Text("contribution:Q", format=".1f"))
+    st.altair_chart((chart + labels), width="stretch")
+    st.caption("Weighted contributions sum to the overall score.")
+
+
 def format_popup(station, current_res, forecast_res, weather_err=None):
     lines = [f"<b>{station_selector_label(station)}</b>"]
     if weather_err:
@@ -401,15 +499,20 @@ def build_airis_map(
     results: list[dict],
     selected_station_id: str | None = None,
     scenarios: list[dict] | None = None,
+    center: dict | None = None,
+    zoom: float | None = None,
+    fit_bounds_locations: list[tuple[float, float]] | None = None,
 ) -> folium.Map:
     """Build the shared charger and temporary-scenario map."""
     scenarios = scenarios or []
-    map_object = folium.Map(location=CARDIFF_CENTER, zoom_start=CARDIFF_ZOOM)
-    all_locations = []
+    center = center or {"lat": CARDIFF_CENTER[0], "lng": CARDIFF_CENTER[1]}
+    map_object = folium.Map(
+        location=(float(center["lat"]), float(center["lng"])),
+        zoom_start=float(CARDIFF_ZOOM if zoom is None else zoom),
+    )
     for result in results:
         row = result["row"]
         latitude, longitude = float(row["latitude"]), float(row["longitude"])
-        all_locations.append((latitude, longitude))
         current = result["current"]
         band = current["risk_band"] if current else None
         color = risk_color(band)
@@ -449,7 +552,6 @@ def build_airis_map(
     for scenario in scenarios:
         latitude = float(scenario["latitude"])
         longitude = float(scenario["longitude"])
-        all_locations.append((latitude, longitude))
         popup_lines = [
             f"<b>{escape(scenario['label'])}</b>",
             f"Name: {escape(scenario['name'])}",
@@ -470,8 +572,8 @@ def build_airis_map(
             icon=folium.Icon(color="purple", icon="star", prefix="fa"),
         ).add_to(map_object)
 
-    if scenarios and all_locations:
-        map_object.fit_bounds(all_locations, padding=(25, 25))
+    if fit_bounds_locations:
+        map_object.fit_bounds(fit_bounds_locations, padding=(25, 25))
 
     legend_html = """
      <div style="position: fixed; bottom: 45px; left: 45px; width:190px;
@@ -520,6 +622,7 @@ def main():
         st.session_state[PROCESSED_SUBMISSIONS_KEY] = set()
     if NEXT_SCENARIO_NUMBER_KEY not in st.session_state:
         st.session_state[NEXT_SCENARIO_NUMBER_KEY] = 1
+    initialise_map_state(st.session_state)
     scenarios = st.session_state[PROPOSAL_STATE_KEY]
 
     # Sidebar simplified
@@ -636,19 +739,7 @@ def main():
                 if weather and 'forecast_max_temperature_c' in weather:
                     st.write(f"Maximum seven-day forecast temperature: {format_temperature(weather.get('seven_day_max_temperature_c'))}")
                 # contribution chart (weighted point contributions)
-                contrib = score_contributions(cur)
-                contrib_df = pd.DataFrame({'factor': list(contrib.keys()), 'contribution': list(contrib.values())})
-                contrib_df = contrib_df.sort_values('contribution', ascending=False)
-                chart = build_contribution_chart(contrib_df)
-                labels = chart.mark_text(
-                    align='left',
-                    baseline='middle',
-                    dx=5,
-                ).encode(
-                    text=alt.Text('contribution:Q', format='.1f')
-                )
-                st.altair_chart((chart + labels), width="stretch")
-                st.caption('Weighted contributions sum to the overall score.')
+                render_contribution_chart(score_contributions(cur))
             else:
                 st.write("Current score: N/A")
             # assessment details
@@ -732,7 +823,6 @@ def main():
                     )
                     if added:
                         st.session_state[NEXT_SCENARIO_NUMBER_KEY] += 1
-                    st.rerun()
 
         if scenarios:
             st.markdown("**Scenario management**")
@@ -750,63 +840,88 @@ def main():
             remove_col, clear_col = st.columns(2)
             if remove_col.button("Remove selected proposed site"):
                 remove_scenario(scenarios, selected_scenario_id)
-                st.rerun()
             confirm_clear = clear_col.checkbox("Confirm clear all")
             if clear_col.button("Clear all proposed sites", disabled=not confirm_clear):
                 clear_scenarios(scenarios)
-                st.rerun()
 
-            st.dataframe(
-                scenario_comparison_table(scenarios),
-                hide_index=True,
-                width="stretch",
-            )
-            selected_scenario = scenario_by_id[selected_scenario_id]
-            st.markdown(f"**{selected_scenario['name']} assessment**")
-            pc1, pc2 = st.columns(2)
-            pc1.metric(
-                "Current score",
-                format_score(selected_scenario["current_score"]),
-            )
-            pc1.write(display_band(selected_scenario["current_category"]))
-            scenario_delta = round(
-                selected_scenario["forecast_score"]
-                - selected_scenario["current_score"],
-                1,
-            )
-            if abs(scenario_delta) < 1e-9:
-                pc2.metric(
-                    "Forecast score",
-                    format_score(selected_scenario["forecast_score"]),
+            if scenarios:
+                st.dataframe(
+                    scenario_comparison_table(scenarios),
+                    hide_index=True,
+                    width="stretch",
                 )
-                pc2.write("No change")
-            else:
-                pc2.metric(
-                    "Forecast score",
-                    format_score(selected_scenario["forecast_score"]),
-                    delta=scenario_delta,
+            selected_scenario = next(
+                (
+                    scenario
+                    for scenario in scenarios
+                    if str(scenario["scenario_id"]) == selected_scenario_id
+                ),
+                None,
+            )
+            if selected_scenario is None:
+                selected_scenario = scenarios[0] if scenarios else None
+            if selected_scenario is not None:
+                st.markdown(f"**{selected_scenario['name']} assessment**")
+                pc1, pc2 = st.columns(2)
+                pc1.metric(
+                    "Current score",
+                    format_score(selected_scenario["current_score"]),
                 )
-            st.write(
-                "Current temperature: "
-                f"{format_temperature(selected_scenario['current_temperature_c'])}"
-            )
-            st.write(
-                "Maximum seven-day forecast temperature: "
-                f"{format_temperature(selected_scenario['forecast_temperature_c'])}"
-            )
-            st.caption(
-                "Flood and income-deprivation scores are manually supplied "
-                "scenario inputs. This temporary scenario is not a verified "
-                "charging location."
-            )
+                pc1.write(display_band(selected_scenario["current_category"]))
+                scenario_delta = round(
+                    selected_scenario["forecast_score"]
+                    - selected_scenario["current_score"],
+                    1,
+                )
+                if abs(scenario_delta) < 1e-9:
+                    pc2.metric(
+                        "Forecast score",
+                        format_score(selected_scenario["forecast_score"]),
+                    )
+                    pc2.write("No change")
+                else:
+                    pc2.metric(
+                        "Forecast score",
+                        format_score(selected_scenario["forecast_score"]),
+                        delta=scenario_delta,
+                    )
+                st.write(
+                    "Current temperature: "
+                    f"{format_temperature(selected_scenario['current_temperature_c'])}"
+                )
+                st.write(
+                    "Maximum seven-day forecast temperature: "
+                    f"{format_temperature(selected_scenario['forecast_temperature_c'])}"
+                )
+                render_contribution_chart(
+                    scenario_current_contributions(selected_scenario)
+                )
+                st.caption(
+                    "Flood and income-deprivation scores are manually supplied "
+                    "scenario inputs. This temporary scenario is not a verified "
+                    "charging location."
+                )
 
     with map_placeholder.container():
-        st_folium(
-            build_airis_map(results, selected_station_id=sid, scenarios=scenarios),
+        if st.button("Reset map view", key="reset_airis_map_view"):
+            reset_map_view(st.session_state)
+        returned_map_state = st_folium(
+            build_airis_map(
+                results,
+                selected_station_id=sid,
+                scenarios=scenarios,
+                center={
+                    "lat": st.session_state[MAP_CENTER_LAT_KEY],
+                    "lng": st.session_state[MAP_CENTER_LON_KEY],
+                },
+                zoom=st.session_state[MAP_ZOOM_KEY],
+            ),
             width="100%",
             height=500,
-            key="airis_shared_map",
+            key=MAP_COMPONENT_KEY,
+            returned_objects=("center", "zoom"),
         )
+        update_map_view(st.session_state, returned_map_state)
 
     # Footer disclaimer and attribution
     st.markdown("---")
