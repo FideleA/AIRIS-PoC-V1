@@ -5,6 +5,8 @@ import geopandas as gpd
 import pandas as pd
 from datetime import datetime, timezone
 from html import escape
+import threading
+import time
 from typing import Optional
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -21,7 +23,12 @@ from config import (
 )
 from data_loader import load_stations
 from scoring import compute_scores
-from weather_service import fetch_open_meteo, WeatherServiceError
+from weather_service import (
+    FORECAST_DAYS,
+    fetch_open_meteo,
+    rounded_coordinates,
+    WeatherServiceError,
+)
 
 
 st.set_page_config(page_title="AIRIS Cardiff PoC Dashboard", layout="wide")
@@ -37,11 +44,12 @@ PROCESSED_SUBMISSIONS_KEY = "airis_processed_proposal_submissions"
 NEXT_SCENARIO_NUMBER_KEY = "airis_next_proposal_number"
 CARDIFF_BOUNDARY_PATH = BASE_DIR / "data" / "processed" / "cardiff_boundary.gpkg"
 MAP_COMPONENT_KEY = "airis_shared_map"
-MAP_CENTER_LAT_KEY = "map_center_lat"
-MAP_CENTER_LON_KEY = "map_center_lon"
-MAP_ZOOM_KEY = "map_zoom"
-MAP_INITIALISED_KEY = "map_initialised"
-MAP_VIEW_TOLERANCE = 1e-6
+ASSESSMENT_STATE_KEY = "airis_site_assessments"
+SELECTED_STATION_KEY = "airis_selected_station"
+LAST_WEATHER_REFRESH_KEY = "airis_last_weather_refresh"
+WEATHER_CACHE_TTL_SECONDS = 1800
+WEATHER_CACHE_MAX_ENTRIES = 256
+WEATHER_REFRESH_THROTTLE_SECONDS = 60
 
 
 @st.cache_data
@@ -231,6 +239,8 @@ def build_scenario_record(
         "forecast_overall_score": float(forecast["overall_score"]),
         "current_temperature_c": float(weather["current_temperature_c"]),
         "forecast_temperature_c": float(weather["seven_day_max_temperature_c"]),
+        "weather_status": weather.get("weather_status", "live"),
+        "weather_retrieved_at": weather.get("retrieved_at"),
         "current_score": float(current["overall_score"]),
         "forecast_score": float(forecast["overall_score"]),
         "current_category": current["risk_band"],
@@ -316,64 +326,106 @@ def truncate_map_label(name: object, limit: int = 36) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def initialise_map_state(state) -> None:
-    if state.get(MAP_INITIALISED_KEY):
-        return
-    state[MAP_CENTER_LAT_KEY] = float(CARDIFF_CENTER[0])
-    state[MAP_CENTER_LON_KEY] = float(CARDIFF_CENTER[1])
-    state[MAP_ZOOM_KEY] = int(CARDIFF_ZOOM)
-    state[MAP_INITIALISED_KEY] = True
+@st.cache_resource
+def weather_runtime_store() -> dict:
+    return {
+        "lock": threading.RLock(),
+        "last_known": {},
+    }
 
 
-def reset_map_view(state) -> None:
-    state[MAP_CENTER_LAT_KEY] = float(CARDIFF_CENTER[0])
-    state[MAP_CENTER_LON_KEY] = float(CARDIFF_CENTER[1])
-    state[MAP_ZOOM_KEY] = int(CARDIFF_ZOOM)
-    state[MAP_INITIALISED_KEY] = True
-
-
-def update_map_view(state, returned_map_state: dict | None) -> bool:
-    """Persist a materially changed Leaflet view without causing another rerun."""
-    if not returned_map_state:
-        return False
-    changed = False
-    center = returned_map_state.get("center")
-    if isinstance(center, dict) and {"lat", "lng"} <= center.keys():
-        candidate = {"lat": float(center["lat"]), "lng": float(center["lng"])}
-        if (
-            -90 <= candidate["lat"] <= 90
-            and -180 <= candidate["lng"] <= 180
-            and (
-                abs(candidate["lat"] - float(state[MAP_CENTER_LAT_KEY]))
-                > MAP_VIEW_TOLERANCE
-                or abs(candidate["lng"] - float(state[MAP_CENTER_LON_KEY]))
-                > MAP_VIEW_TOLERANCE
-            )
-        ):
-            state[MAP_CENTER_LAT_KEY] = candidate["lat"]
-            state[MAP_CENTER_LON_KEY] = candidate["lng"]
-            changed = True
-    zoom = returned_map_state.get("zoom")
+@st.cache_data(
+    ttl=WEATHER_CACHE_TTL_SECONDS,
+    max_entries=WEATHER_CACHE_MAX_ENTRIES,
+    show_spinner=False,
+)
+def _cached_provider_weather(
+    latitude: float,
+    longitude: float,
+    forecast_days: int = FORECAST_DAYS,
+) -> dict:
+    """Cache both successes and failures so reruns cannot create retry storms."""
     try:
-        candidate_zoom = float(zoom)
-    except (TypeError, ValueError):
-        candidate_zoom = None
-    if (
-        candidate_zoom is not None
-        and 0 <= candidate_zoom <= 22
-        and abs(candidate_zoom - float(state[MAP_ZOOM_KEY])) > MAP_VIEW_TOLERANCE
-    ):
-        state[MAP_ZOOM_KEY] = candidate_zoom
-        changed = True
-    return changed
-
-
-@st.cache_data(ttl=1800)
-def cached_weather(lat: float, lon: float) -> dict:
-    try:
-        return fetch_open_meteo(lat, lon)
+        result = fetch_open_meteo(
+            latitude,
+            longitude,
+            forecast_days=forecast_days,
+        )
+        return {**result, "weather_status": "live"}
     except WeatherServiceError as e:
-        return {"error": str(e)}
+        return {
+            "error": str(e),
+            "error_kind": e.kind,
+            "status_code": e.status_code,
+            "retry_after_seconds": e.retry_after_seconds,
+            "weather_status": "unavailable",
+        }
+
+
+def _weather_age_seconds(weather: dict) -> float | None:
+    try:
+        retrieved = datetime.fromisoformat(
+            str(weather["retrieved_at"]).replace("Z", "+00:00")
+        )
+        return max(0.0, (datetime.now(timezone.utc) - retrieved).total_seconds())
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def cached_weather(
+    lat: float,
+    lon: float,
+    *,
+    force_refresh: bool = False,
+    forecast_days: int = FORECAST_DAYS,
+) -> dict:
+    latitude, longitude = rounded_coordinates(lat, lon)
+    cache_key = (latitude, longitude, int(forecast_days))
+    store = weather_runtime_store()
+
+    with store["lock"]:
+        last_known = store["last_known"].get(cache_key)
+        last_known = dict(last_known) if last_known else None
+    if (
+        not force_refresh
+        and last_known
+        and (_weather_age_seconds(last_known) or 0) < WEATHER_CACHE_TTL_SECONDS
+    ):
+        return {**last_known, "weather_status": "cached"}
+
+    if force_refresh:
+        try:
+            result = fetch_open_meteo(
+                latitude,
+                longitude,
+                forecast_days=forecast_days,
+            )
+            result = {**result, "weather_status": "live"}
+        except WeatherServiceError as error:
+            result = {
+                "error": str(error),
+                "error_kind": error.kind,
+                "status_code": error.status_code,
+                "retry_after_seconds": error.retry_after_seconds,
+                "weather_status": "unavailable",
+            }
+    else:
+        result = _cached_provider_weather(latitude, longitude, int(forecast_days))
+
+    if not result.get("error"):
+        with store["lock"]:
+            store["last_known"][cache_key] = dict(result)
+        return result
+
+    if last_known:
+        return {
+            **last_known,
+            "weather_status": "last-known",
+            "weather_warning": result["error"],
+            "error_kind": result.get("error_kind"),
+            "status_code": result.get("status_code"),
+        }
+    return result
 
 
 def risk_color(band: Optional[str]) -> str:
@@ -499,16 +551,13 @@ def build_airis_map(
     results: list[dict],
     selected_station_id: str | None = None,
     scenarios: list[dict] | None = None,
-    center: dict | None = None,
-    zoom: float | None = None,
     fit_bounds_locations: list[tuple[float, float]] | None = None,
 ) -> folium.Map:
     """Build the shared charger and temporary-scenario map."""
     scenarios = scenarios or []
-    center = center or {"lat": CARDIFF_CENTER[0], "lng": CARDIFF_CENTER[1]}
     map_object = folium.Map(
-        location=(float(center["lat"]), float(center["lng"])),
-        zoom_start=float(CARDIFF_ZOOM if zoom is None else zoom),
+        location=CARDIFF_CENTER,
+        zoom_start=CARDIFF_ZOOM,
     )
     for result in results:
         row = result["row"]
@@ -590,10 +639,37 @@ def build_airis_map(
     return map_object
 
 
-def compute_site_scores_safe(station):
+def render_airis_map(map_object: folium.Map):
+    """Render a display-oriented map without returning Leaflet interactions."""
+    return st_folium(
+        map_object,
+        height=500,
+        key=MAP_COMPONENT_KEY,
+        returned_objects=[],
+        use_container_width=True,
+    )
+
+
+def station_result_by_id(results: list[dict], station_id: str) -> dict | None:
+    """Resolve the dropdown-selected station; map clicks are not selection inputs."""
+    return next(
+        (
+            result
+            for result in results
+            if str(result["station_id"]) == str(station_id)
+        ),
+        None,
+    )
+
+
+def compute_site_scores_safe(station, *, force_refresh: bool = False):
     lat = station["latitude"]
     lon = station["longitude"]
-    weather = cached_weather(lat, lon)
+    weather = (
+        cached_weather(lat, lon, force_refresh=True)
+        if force_refresh
+        else cached_weather(lat, lon)
+    )
     if weather.get("error"):
         return None, None, weather.get("error"), weather
     try:
@@ -603,6 +679,54 @@ def compute_site_scores_safe(station):
         return cur, fcast, None, weather
     except Exception as e:
         return None, None, str(e), weather
+
+
+def site_result_record(station, assessment: tuple | None = None) -> dict:
+    current, forecast, error, weather = assessment or (None, None, None, None)
+    return {
+        "station_id": station["station_id"],
+        "current": current,
+        "forecast": forecast,
+        "error": error,
+        "row": station,
+        "weather": weather,
+    }
+
+
+def results_from_stored_assessments(
+    stations: pd.DataFrame,
+    assessments: dict[str, tuple],
+) -> list[dict]:
+    """Build portfolio/map inputs without making live provider requests."""
+    return [
+        site_result_record(
+            row,
+            assessments.get(str(row["station_id"])),
+        )
+        for _, row in stations.iterrows()
+    ]
+
+
+def weather_availability_message(weather: dict | None) -> str:
+    kind = (weather or {}).get("error_kind")
+    if kind == "rate_limit":
+        return (
+            "Live weather is temporarily rate-limited. AIRIS will use the most "
+            "recent available weather data where possible."
+        )
+    if kind == "timeout":
+        return "Live weather timed out. Please try again later."
+    if kind == "provider_5xx":
+        return "The live weather provider is temporarily unavailable."
+    return "Live weather is temporarily unavailable for this location."
+
+
+def weather_status_label(weather: dict) -> str:
+    return {
+        "live": "Live",
+        "cached": "Cached",
+        "last-known": "Last-known",
+    }.get(str(weather.get("weather_status")), "Unavailable")
 
 
 def main():
@@ -622,8 +746,13 @@ def main():
         st.session_state[PROCESSED_SUBMISSIONS_KEY] = set()
     if NEXT_SCENARIO_NUMBER_KEY not in st.session_state:
         st.session_state[NEXT_SCENARIO_NUMBER_KEY] = 1
-    initialise_map_state(st.session_state)
+    if ASSESSMENT_STATE_KEY not in st.session_state:
+        st.session_state[ASSESSMENT_STATE_KEY] = {}
+    station_ids = stations["station_id"].astype(str).tolist()
+    if st.session_state.get(SELECTED_STATION_KEY) not in station_ids:
+        st.session_state[SELECTED_STATION_KEY] = station_ids[0]
     scenarios = st.session_state[PROPOSAL_STATE_KEY]
+    assessments = st.session_state[ASSESSMENT_STATE_KEY]
 
     # Sidebar simplified
     with st.sidebar:
@@ -652,14 +781,16 @@ def main():
             st.write("OpenStreetMap")
             st.write("Open-Meteo")
 
-    # Compute scores for all stations (with graceful handling)
-    results = []
-    errors = []
-    for _, row in stations.iterrows():
-        cur, fcast, err, weather = compute_site_scores_safe(row)
-        results.append({"station_id": row["station_id"], "current": cur, "forecast": fcast, "error": err, "row": row, "weather": weather})
-        if err:
-            errors.append((row["station_id"], err))
+    # Only the dropdown-selected site may trigger a live weather lookup.
+    selected_station_id = str(st.session_state[SELECTED_STATION_KEY])
+    selected_station = stations.loc[
+        stations["station_id"].astype(str) == selected_station_id
+    ].iloc[0]
+    if selected_station_id not in assessments:
+        assessments[selected_station_id] = compute_site_scores_safe(selected_station)
+
+    # All other map and portfolio inputs use previously stored assessments.
+    results = results_from_stored_assessments(stations, assessments)
 
     metrics = portfolio_metrics(results)
 
@@ -704,11 +835,12 @@ def main():
             format_func=lambda station_id: station_selector_label(
                 station_by_id[station_id]
             ),
+            key=SELECTED_STATION_KEY,
         )
-        sel = next((r for r in results if r["station_id"] == sid), None)
+        sel = station_result_by_id(results, sid)
         if sel:
             if sel["error"]:
-                st.warning(f"Weather error for selected site: {sel['error']}")
+                st.warning(weather_availability_message(sel.get("weather")))
             cur = sel["current"]
             fcast = sel["forecast"]
             weather = sel.get('weather')
@@ -733,6 +865,11 @@ def main():
                         f"Calculated using model {MODEL_VERSION} and weather retrieved "
                         f"at {format_london_timestamp(weather['retrieved_at'])}."
                     )
+                    st.caption(
+                        f"Weather result: {weather_status_label(weather)}"
+                    )
+                    if weather.get("weather_warning"):
+                        st.warning(weather_availability_message(weather))
                 # temperatures
                 if weather and 'current_temperature_c' in weather:
                     st.write(f"Current temperature: {format_temperature(weather.get('current_temperature_c'))}")
@@ -741,7 +878,27 @@ def main():
                 # contribution chart (weighted point contributions)
                 render_contribution_chart(score_contributions(cur))
             else:
-                st.write("Current score: N/A")
+                st.info(
+                    "A current assessment is temporarily unavailable because live "
+                    "weather could not be retrieved and no earlier result is stored."
+                )
+            refresh_disabled = (
+                time.monotonic()
+                - float(st.session_state.get(LAST_WEATHER_REFRESH_KEY, 0.0))
+                < WEATHER_REFRESH_THROTTLE_SECONDS
+            )
+            if st.button(
+                "Refresh weather",
+                key="refresh_selected_weather",
+                disabled=refresh_disabled,
+                help="Refresh is limited to once per minute.",
+            ):
+                st.session_state[LAST_WEATHER_REFRESH_KEY] = time.monotonic()
+                assessments[str(sid)] = compute_site_scores_safe(
+                    sel["row"],
+                    force_refresh=True,
+                )
+                st.rerun()
             # assessment details
             with st.expander('Assessment details', expanded=False):
                 st.write(f"Data mode: {dataset_mode_label(DATA_MODE)}")
@@ -799,12 +956,14 @@ def main():
             else:
                 weather = cached_weather(lat, lon)
                 if weather.get("error"):
-                    st.warning(f"Weather error: {weather['error']}")
+                    st.warning(weather_availability_message(weather))
                     st.write(
                         "The scenario was not added. Previously added scenarios "
                         "remain available."
                     )
                 else:
+                    if weather.get("weather_warning"):
+                        st.warning(weather_availability_message(weather))
                     scenario = build_scenario_record(
                         scenarios,
                         lat,
@@ -893,6 +1052,12 @@ def main():
                     "Maximum seven-day forecast temperature: "
                     f"{format_temperature(selected_scenario['forecast_temperature_c'])}"
                 )
+                if selected_scenario.get("weather_retrieved_at"):
+                    st.caption(
+                        "Weather retrieved "
+                        f"{format_london_timestamp(selected_scenario['weather_retrieved_at'])} "
+                        f"({str(selected_scenario.get('weather_status', 'live')).title()})."
+                    )
                 render_contribution_chart(
                     scenario_current_contributions(selected_scenario)
                 )
@@ -903,25 +1068,18 @@ def main():
                 )
 
     with map_placeholder.container():
-        if st.button("Reset map view", key="reset_airis_map_view"):
-            reset_map_view(st.session_state)
-        returned_map_state = st_folium(
+        st.button(
+            "Reset map view",
+            key="reset_airis_map_view",
+            help="Restore the configured Cardiff centre and default zoom.",
+        )
+        render_airis_map(
             build_airis_map(
                 results,
                 selected_station_id=sid,
                 scenarios=scenarios,
-                center={
-                    "lat": st.session_state[MAP_CENTER_LAT_KEY],
-                    "lng": st.session_state[MAP_CENTER_LON_KEY],
-                },
-                zoom=st.session_state[MAP_ZOOM_KEY],
-            ),
-            width="100%",
-            height=500,
-            key=MAP_COMPONENT_KEY,
-            returned_objects=("center", "zoom"),
+            )
         )
-        update_map_view(st.session_state, returned_map_state)
 
     # Footer disclaimer and attribution
     st.markdown("---")
@@ -929,7 +1087,6 @@ def main():
     with st.expander("Data attribution and licences"):
         for statement in attribution_statements(DATA_MODE):
             st.caption(statement)
-
 
 if __name__ == '__main__':
     main()

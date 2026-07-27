@@ -1,30 +1,24 @@
 import pandas as pd
 import pytest
 from shapely.geometry import box
+import app
 
 from app import (
-    CARDIFF_CENTER,
-    CARDIFF_ZOOM,
-    MAP_CENTER_LAT_KEY,
-    MAP_CENTER_LON_KEY,
     MAP_COMPONENT_KEY,
-    MAP_INITIALISED_KEY,
-    MAP_ZOOM_KEY,
     add_scenario_once,
     build_airis_map,
     build_scenario_record,
     clear_scenarios,
     coordinates_within_cardiff,
-    initialise_map_state,
     next_scenario_number,
     contribution_dataframe,
     portfolio_metrics,
     remove_scenario,
-    reset_map_view,
+    render_airis_map,
     scenario_comparison_table,
     scenario_current_contributions,
+    station_result_by_id,
     truncate_map_label,
-    update_map_view,
     valid_global_coordinates,
 )
 
@@ -243,78 +237,56 @@ def test_map_component_key_is_stable_and_not_derived_from_selection_or_mode():
     assert MAP_COMPONENT_KEY == "airis_shared_map"
 
 
-def test_map_view_persists_returned_center_and_zoom_only_when_changed():
-    state = {}
-    initialise_map_state(state)
-    returned = {
-        "center": {"lat": 51.4925, "lng": -3.205},
-        "zoom": 15,
-        "bounds": {
-            "_southWest": {"lat": 51.47, "lng": -3.23},
-            "_northEast": {"lat": 51.51, "lng": -3.18},
-        },
-    }
-    assert update_map_view(state, returned)
-    assert state[MAP_CENTER_LAT_KEY] == returned["center"]["lat"]
-    assert state[MAP_CENTER_LON_KEY] == returned["center"]["lng"]
-    assert state[MAP_ZOOM_KEY] == 15
-    assert not update_map_view(state, returned)
+def test_map_renderer_returns_no_interaction_objects(monkeypatch):
+    captured = {}
+
+    def fake_st_folium(map_object, **kwargs):
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(app, "st_folium", fake_st_folium)
+    rendered = build_airis_map([charger_result()])
+    assert render_airis_map(rendered) == {}
+    assert captured["key"] == MAP_COMPONENT_KEY
+    assert captured["returned_objects"] == []
+    assert captured["use_container_width"] is True
+    assert "center" not in captured
+    assert "zoom" not in captured
+    assert "return_on_hover" not in captured
 
 
-def test_explicit_reset_restores_cardiff_default_view_and_clears_pending_fit():
-    state = {
-        MAP_CENTER_LAT_KEY: 51.6,
-        MAP_CENTER_LON_KEY: -3.4,
-        MAP_ZOOM_KEY: 17,
-        MAP_INITIALISED_KEY: True,
-    }
-    reset_map_view(state)
-    assert state[MAP_CENTER_LAT_KEY] == float(CARDIFF_CENTER[0])
-    assert state[MAP_CENTER_LON_KEY] == float(CARDIFF_CENTER[1])
-    assert state[MAP_ZOOM_KEY] == CARDIFF_ZOOM
+def test_station_dropdown_id_is_authoritative_selection_input():
+    first = charger_result("First", "first")
+    second = charger_result("Second", "second")
+    assert station_result_by_id([first, second], "second") is second
+    assert station_result_by_id([first, second], "missing") is None
 
 
-def test_ordinary_map_rebuild_uses_persisted_view_without_fit_bounds():
-    center = {"lat": 51.4925, "lng": -3.205}
+def test_ordinary_map_rebuild_uses_default_view_without_fit_bounds():
     rendered = build_airis_map(
         [charger_result()],
         selected_station_id="airis_internal",
-        center=center,
-        zoom=16,
     ).get_root().render()
     assert "fitBounds(" not in rendered
-    assert "[51.4925, -3.205]" in rendered
-    assert '"zoom": 16' in rendered
 
 
 def test_selected_site_change_does_not_add_fit_bounds():
     first = charger_result("First", "first")
     second = charger_result("Second", "second")
     rendered = build_airis_map(
-        [first, second], selected_station_id="second", zoom=15
+        [first, second], selected_station_id="second"
     ).get_root().render()
     assert "fitBounds(" not in rendered
     assert "Second" in rendered
 
 
-def test_charger_and_proposal_selection_do_not_change_persisted_view():
-    state = {}
-    initialise_map_state(state)
-    update_map_view(
-        state, {"center": {"lat": 51.4925, "lng": -3.205}, "zoom": 16}
-    )
-    saved_view = dict(state)
-    build_airis_map(
+def test_charger_and_proposal_selection_do_not_add_fit_bounds():
+    rendered = build_airis_map(
         [charger_result("First", "first"), charger_result("Second", "second")],
         selected_station_id="second",
         scenarios=[scenario()],
-        center={
-            "lat": state[MAP_CENTER_LAT_KEY],
-            "lng": state[MAP_CENTER_LON_KEY],
-        },
-        zoom=state[MAP_ZOOM_KEY],
-    )
-    assert state == saved_view
+    ).get_root().render()
+    assert "fitBounds(" not in rendered
 
 
 def test_fit_bounds_is_only_added_when_explicitly_requested():
@@ -323,33 +295,6 @@ def test_fit_bounds_is_only_added_when_explicitly_requested():
         fit_bounds_locations=[(51.48, -3.18), (51.7, -3.5)],
     ).get_root().render()
     assert "fitBounds(" in rendered
-
-
-def test_map_state_is_initialised_once():
-    state = {}
-    initialise_map_state(state)
-    state[MAP_CENTER_LAT_KEY] = 51.5
-    state[MAP_ZOOM_KEY] = 16
-    initialise_map_state(state)
-    assert state[MAP_CENTER_LAT_KEY] == 51.5
-    assert state[MAP_ZOOM_KEY] == 16
-    assert state[MAP_INITIALISED_KEY]
-
-
-def test_map_view_ignores_floating_point_noise_and_invalid_values():
-    state = {}
-    initialise_map_state(state)
-    returned = {
-        "center": {
-            "lat": CARDIFF_CENTER[0] + 1e-8,
-            "lng": CARDIFF_CENTER[1] - 1e-8,
-        },
-        "zoom": CARDIFF_ZOOM + 1e-8,
-    }
-    assert not update_map_view(state, returned)
-    assert not update_map_view(
-        state, {"center": {"lat": 999, "lng": -3}, "zoom": 99}
-    )
 
 
 def test_scenario_stores_contributions_and_required_factor_values():
