@@ -22,6 +22,7 @@ from config import (
     WEATHER_ATTRIBUTION,
 )
 from data_loader import load_stations
+from portfolio_assessments import baseline_assessments_for_stations
 from scoring import compute_scores
 from weather_service import (
     FORECAST_DAYS,
@@ -47,6 +48,7 @@ MAP_COMPONENT_KEY = "airis_shared_map"
 ASSESSMENT_STATE_KEY = "airis_site_assessments"
 SELECTED_STATION_KEY = "airis_selected_station"
 LAST_WEATHER_REFRESH_KEY = "airis_last_weather_refresh"
+PENDING_SELECTED_ASSESSMENT_KEY = "airis_pending_selected_assessment"
 WEATHER_CACHE_TTL_SECONDS = 1800
 WEATHER_CACHE_MAX_ENTRIES = 256
 WEATHER_REFRESH_THROTTLE_SECONDS = 60
@@ -530,15 +532,28 @@ def render_contribution_chart(contributions: dict[str, float]) -> None:
     st.caption("Weighted contributions sum to the overall score.")
 
 
-def format_popup(station, current_res, forecast_res, weather_err=None):
+def format_popup(
+    station,
+    current_res,
+    forecast_res,
+    weather_err=None,
+    weather=None,
+):
     lines = [f"<b>{station_selector_label(station)}</b>"]
     if weather_err:
         lines.append(f"<i>Weather error: {weather_err}</i>")
     if current_res:
         band_display = display_band(current_res['risk_band'])
-        lines.append(f"Current score: {current_res['overall_score']} ({band_display})")
+        lines.append(f"Score: {float(current_res['overall_score']):.1f}")
+        lines.append(f"Risk: {band_display}")
+        calculated_at = current_res.get("calculated_at")
+        if calculated_at:
+            lines.append(
+                f"Last calculated: {escape(format_london_timestamp(calculated_at))}"
+            )
     else:
-        lines.append("Current score: N/A")
+        lines.append("Score unavailable")
+        lines.append("No stored assessment")
     if forecast_res:
         band_display = display_band(forecast_res['risk_band'])
         lines.append(f"Forecast score: {forecast_res['overall_score']} ({band_display})")
@@ -579,6 +594,7 @@ def build_airis_map(
                     current,
                     result["forecast"],
                     result["error"],
+                    result.get("weather"),
                 ),
                 max_width=300,
             ),
@@ -681,6 +697,28 @@ def compute_site_scores_safe(station, *, force_refresh: bool = False):
         return None, None, str(e), weather
 
 
+def retain_stored_assessment_on_failure(
+    refreshed: tuple,
+    stored: tuple | None,
+) -> tuple:
+    if refreshed[0] is not None or not stored or stored[0] is None:
+        return refreshed
+    _, _, error, failed_weather = refreshed
+    current, forecast, _, stored_weather = stored
+    fallback_weather = {
+        **(stored_weather or {}),
+        "weather_status": "stored",
+        "weather_warning": error,
+        "error_kind": (failed_weather or {}).get("error_kind"),
+        "status_code": (failed_weather or {}).get("status_code"),
+    }
+    return current, forecast, None, fallback_weather
+
+
+def queue_selected_site_assessment() -> None:
+    st.session_state[PENDING_SELECTED_ASSESSMENT_KEY] = True
+
+
 def site_result_record(station, assessment: tuple | None = None) -> dict:
     current, forecast, error, weather = assessment or (None, None, None, None)
     return {
@@ -726,6 +764,7 @@ def weather_status_label(weather: dict) -> str:
         "live": "Live",
         "cached": "Cached",
         "last-known": "Last-known",
+        "stored": "Stored",
     }.get(str(weather.get("weather_status")), "Unavailable")
 
 
@@ -746,13 +785,16 @@ def main():
         st.session_state[PROCESSED_SUBMISSIONS_KEY] = set()
     if NEXT_SCENARIO_NUMBER_KEY not in st.session_state:
         st.session_state[NEXT_SCENARIO_NUMBER_KEY] = 1
+    baseline_assessments = baseline_assessments_for_stations(stations, DATA_MODE)
     if ASSESSMENT_STATE_KEY not in st.session_state:
-        st.session_state[ASSESSMENT_STATE_KEY] = {}
+        st.session_state[ASSESSMENT_STATE_KEY] = dict(baseline_assessments)
     station_ids = stations["station_id"].astype(str).tolist()
     if st.session_state.get(SELECTED_STATION_KEY) not in station_ids:
         st.session_state[SELECTED_STATION_KEY] = station_ids[0]
     scenarios = st.session_state[PROPOSAL_STATE_KEY]
     assessments = st.session_state[ASSESSMENT_STATE_KEY]
+    for station_id, assessment in baseline_assessments.items():
+        assessments.setdefault(station_id, assessment)
 
     # Sidebar simplified
     with st.sidebar:
@@ -781,13 +823,17 @@ def main():
             st.write("OpenStreetMap")
             st.write("Open-Meteo")
 
-    # Only the dropdown-selected site may trigger a live weather lookup.
+    # Initial rendering uses the persistent baseline and makes no weather request.
     selected_station_id = str(st.session_state[SELECTED_STATION_KEY])
     selected_station = stations.loc[
         stations["station_id"].astype(str) == selected_station_id
     ].iloc[0]
-    if selected_station_id not in assessments:
-        assessments[selected_station_id] = compute_site_scores_safe(selected_station)
+    if st.session_state.pop(PENDING_SELECTED_ASSESSMENT_KEY, False):
+        refreshed = compute_site_scores_safe(selected_station)
+        assessments[selected_station_id] = retain_stored_assessment_on_failure(
+            refreshed,
+            assessments.get(selected_station_id),
+        )
 
     # All other map and portfolio inputs use previously stored assessments.
     results = results_from_stored_assessments(stations, assessments)
@@ -836,6 +882,7 @@ def main():
                 station_by_id[station_id]
             ),
             key=SELECTED_STATION_KEY,
+            on_change=queue_selected_site_assessment,
         )
         sel = station_result_by_id(results, sid)
         if sel:
@@ -894,9 +941,13 @@ def main():
                 help="Refresh is limited to once per minute.",
             ):
                 st.session_state[LAST_WEATHER_REFRESH_KEY] = time.monotonic()
-                assessments[str(sid)] = compute_site_scores_safe(
+                refreshed = compute_site_scores_safe(
                     sel["row"],
                     force_refresh=True,
+                )
+                assessments[str(sid)] = retain_stored_assessment_on_failure(
+                    refreshed,
+                    assessments.get(str(sid)),
                 )
                 st.rerun()
             # assessment details
@@ -1068,6 +1119,10 @@ def main():
                 )
 
     with map_placeholder.container():
+        st.caption(
+            "Map colours use the latest stored assessment. Select a site for "
+            "current and forecast detail."
+        )
         st.button(
             "Reset map view",
             key="reset_airis_map_view",

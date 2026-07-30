@@ -85,6 +85,15 @@ def test_selected_charger_gets_one_persistent_truncated_name_label():
     assert "airis_internal" not in rendered
 
 
+def test_stored_marker_popup_includes_score_risk_and_timestamp():
+    result = charger_result()
+    result["current"]["calculated_at"] = "2026-07-30T12:45:00+00:00"
+    rendered = build_airis_map([result]).get_root().render()
+    assert "Score: 20.0" in rendered
+    assert "Risk: Very low risk" in rendered
+    assert "Last calculated:" in rendered
+
+
 def test_proposed_marker_is_absent_until_a_scenario_exists():
     rendered = build_airis_map([charger_result()], scenarios=[]).get_root().render()
     assert "Proposed Site 1" not in rendered
