@@ -52,6 +52,17 @@ PENDING_SELECTED_ASSESSMENT_KEY = "airis_pending_selected_assessment"
 WEATHER_CACHE_TTL_SECONDS = 1800
 WEATHER_CACHE_MAX_ENTRIES = 256
 WEATHER_REFRESH_THROTTLE_SECONDS = 60
+INTRODUCTORY_DESCRIPTION = (
+    "This proof of concept calculates current and seven-day forecast risk "
+    "scores for EV charging stations in Cardiff, based on only three factors: "
+    "flood exposure, temperature and local deprivation."
+)
+HOW_TO_USE_ANCHOR = "how-to-use-this-dashboard"
+SCORE_CALCULATION_NOTE = (
+    "Score calculation: Overall risk score = 50% flood exposure + 30% "
+    "temperature + 20% local deprivation. These weights are hypothetical and "
+    "used for demonstration in this proof of concept."
+)
 
 
 @st.cache_data
@@ -768,10 +779,54 @@ def weather_status_label(weather: dict) -> str:
     }.get(str(weather.get("weather_status")), "Unavailable")
 
 
+def render_dashboard_intro():
+    st.markdown(INTRODUCTORY_DESCRIPTION)
+    st.markdown(
+        f'<a href="#{HOW_TO_USE_ANCHOR}">How to use this site</a>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_dashboard_guide():
+    st.markdown(
+        f'<div id="{HOW_TO_USE_ANCHOR}"></div>',
+        unsafe_allow_html=True,
+    )
+    with st.expander("How to use this dashboard", expanded=True):
+        st.markdown(
+            """
+1. **Explore the map**
+
+   Zoom, pan and hover over a charging station to view its name and latest
+   stored risk score.
+
+2. **Select a station**
+
+   Choose an existing charging station from the list to see its current and
+   seven-day forecast risk assessment.
+
+3. **Review the results**
+
+   Check the overall risk score, risk category and the contribution of flood
+   exposure, temperature and local deprivation.
+
+4. **Assess a proposed site**
+
+   Enter the site’s latitude and longitude, then use the sliders to set its
+   local deprivation and flood-exposure values. Temperature is retrieved
+   automatically from the site coordinates using current and forecast weather
+   data.
+            """
+        )
+        st.caption(SCORE_CALCULATION_NOTE)
+
+
 def main():
     st.title("AIRIS Cardiff PoC Dashboard")
+    render_dashboard_intro()
     st.subheader("EV charging-site risk intelligence — research demonstrator")
     st.info(f"**Active data mode: {dataset_mode_label(DATA_MODE)}**")
+    render_dashboard_guide()
 
     try:
         stations = get_stations(DATA_MODE)
