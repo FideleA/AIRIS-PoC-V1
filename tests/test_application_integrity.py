@@ -1,7 +1,5 @@
 import importlib
 from pathlib import Path
-from unittest.mock import Mock
-
 import pytest
 
 
@@ -34,35 +32,48 @@ def test_app_imports_without_errors():
 def test_dashboard_orientation_content(monkeypatch):
     app = importlib.import_module("app")
     rendered_markdown = []
-    captions = []
 
-    expander = Mock()
-    expander.__enter__ = Mock(return_value=expander)
-    expander.__exit__ = Mock(return_value=False)
     monkeypatch.setattr(
         app.st,
         "markdown",
         lambda text, **kwargs: rendered_markdown.append((text, kwargs)),
     )
-    monkeypatch.setattr(app.st, "caption", captions.append)
-    expander_call = Mock(return_value=expander)
-    monkeypatch.setattr(app.st, "expander", expander_call)
 
     app.render_dashboard_intro()
     app.render_dashboard_guide()
 
     all_markdown = "\n".join(text for text, _ in rendered_markdown)
     assert app.INTRODUCTORY_DESCRIPTION in all_markdown
+    assert 'role="note"' in rendered_markdown[0][0]
+    assert "font-size:1.1rem" in rendered_markdown[0][0]
     assert ">How to use this site</a>" in all_markdown
+    assert f'href="#{app.HOW_TO_USE_ANCHOR}"' in all_markdown
     assert f'id="{app.HOW_TO_USE_ANCHOR}"' in all_markdown
-    expander_call.assert_called_once_with(
-        "How to use this dashboard", expanded=True
+    assert all_markdown.count(f'id="{app.HOW_TO_USE_ANCHOR}"') == 1
+    assert all_markdown.index(f'id="{app.HOW_TO_USE_ANCHOR}"') < (
+        all_markdown.index("How to use this dashboard")
     )
+    assert "<section" in all_markdown
+    assert 'aria-labelledby="airis-guide-title"' in all_markdown
+    assert 'id="airis-guide-title"' in all_markdown
+    assert "<ol" in all_markdown
     for heading in (
         "Explore the map",
         "Select a station",
         "Review the results",
         "Assess a proposed site",
     ):
-        assert f"**{heading}**" in all_markdown
-    assert captions == [app.SCORE_CALCULATION_NOTE]
+        assert f"<strong>{heading}</strong>" in all_markdown
+    assert app.SCORE_CALCULATION_NOTE.startswith("Note:")
+    assert all(
+        weight in app.SCORE_CALCULATION_NOTE
+        for weight in ("50%", "30%", "20%")
+    )
+    assert "color:#c62828" in all_markdown
+    assert "overflow-wrap:anywhere" in all_markdown
+
+
+def test_redundant_dashboard_subtitle_is_absent():
+    app_source = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+    assert "EV charging-site risk intelligence" not in app_source
+    assert 'with st.expander("How to use this dashboard"' not in app_source

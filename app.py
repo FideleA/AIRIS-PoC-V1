@@ -59,7 +59,7 @@ INTRODUCTORY_DESCRIPTION = (
 )
 HOW_TO_USE_ANCHOR = "how-to-use-this-dashboard"
 SCORE_CALCULATION_NOTE = (
-    "Score calculation: Overall risk score = 50% flood exposure + 30% "
+    "Note: Score calculation: Overall risk score = 50% flood exposure + 30% "
     "temperature + 20% local deprivation. These weights are hypothetical and "
     "used for demonstration in this proof of concept."
 )
@@ -780,7 +780,16 @@ def weather_status_label(weather: dict) -> str:
 
 
 def render_dashboard_intro():
-    st.markdown(INTRODUCTORY_DESCRIPTION)
+    st.markdown(
+        (
+            '<div role="note" style="background:rgba(28,131,225,0.08);'
+            "border:1px solid rgba(28,131,225,0.28);border-radius:0.5rem;"
+            "padding:0.75rem 1rem;margin:0.25rem 0 0.5rem 0;"
+            'font-size:1.1rem;line-height:1.5;">'
+            f"{escape(INTRODUCTORY_DESCRIPTION)}</div>"
+        ),
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f'<a href="#{HOW_TO_USE_ANCHOR}">How to use this site</a>',
         unsafe_allow_html=True,
@@ -789,44 +798,44 @@ def render_dashboard_intro():
 
 def render_dashboard_guide():
     st.markdown(
-        f'<div id="{HOW_TO_USE_ANCHOR}"></div>',
+        f"""
+<span id="{HOW_TO_USE_ANCHOR}" style="display:block;scroll-margin-top:1rem;"></span>
+<section aria-labelledby="airis-guide-title">
+  <div id="airis-guide-title"
+       style="font-size:1.75rem;font-weight:600;line-height:1.3;
+       margin:0 0 0.75rem 0;">How to use this dashboard</div>
+  <ol style="padding-left:1.4rem;margin-bottom:0.75rem;">
+    <li style="margin-bottom:0.6rem;"><strong>Explore the map</strong><br>
+      Zoom, pan and hover over a charging station to view its name and latest
+      stored risk score.</li>
+    <li style="margin-bottom:0.6rem;"><strong>Select a station</strong><br>
+      Choose an existing charging station from the list to see its current and
+      seven-day forecast risk assessment.</li>
+    <li style="margin-bottom:0.6rem;"><strong>Review the results</strong><br>
+      Check the overall risk score, risk category and the contribution of flood
+      exposure, temperature and local deprivation.</li>
+    <li style="margin-bottom:0.6rem;"><strong>Assess a proposed site</strong><br>
+      Enter the site’s latitude and longitude, then use the sliders to set its
+      local deprivation and flood-exposure values. Temperature is retrieved
+      automatically from the site coordinates using current and forecast
+      weather data.</li>
+  </ol>
+  <div role="note" style="color:#c62828;background:rgba(198,40,40,0.06);
+       border:1px solid rgba(198,40,40,0.45);border-radius:0.4rem;
+       padding:0.75rem 1rem;margin:1rem 0;font-size:1.05rem;line-height:1.5;
+       white-space:normal;overflow-wrap:anywhere;">
+    {escape(SCORE_CALCULATION_NOTE)}
+  </div>
+</section>
+        """,
         unsafe_allow_html=True,
     )
-    with st.expander("How to use this dashboard", expanded=True):
-        st.markdown(
-            """
-1. **Explore the map**
-
-   Zoom, pan and hover over a charging station to view its name and latest
-   stored risk score.
-
-2. **Select a station**
-
-   Choose an existing charging station from the list to see its current and
-   seven-day forecast risk assessment.
-
-3. **Review the results**
-
-   Check the overall risk score, risk category and the contribution of flood
-   exposure, temperature and local deprivation.
-
-4. **Assess a proposed site**
-
-   Enter the site’s latitude and longitude, then use the sliders to set its
-   local deprivation and flood-exposure values. Temperature is retrieved
-   automatically from the site coordinates using current and forecast weather
-   data.
-            """
-        )
-        st.caption(SCORE_CALCULATION_NOTE)
 
 
 def main():
     st.title("AIRIS Cardiff PoC Dashboard")
     render_dashboard_intro()
-    st.subheader("EV charging-site risk intelligence — research demonstrator")
     st.info(f"**Active data mode: {dataset_mode_label(DATA_MODE)}**")
-    render_dashboard_guide()
 
     try:
         stations = get_stations(DATA_MODE)
@@ -1190,6 +1199,8 @@ def main():
                 scenarios=scenarios,
             )
         )
+
+    render_dashboard_guide()
 
     # Footer disclaimer and attribution
     st.markdown("---")
