@@ -58,7 +58,6 @@ INTRODUCTORY_DESCRIPTION = (
     "scores for EV charging stations in Cardiff, based on only three factors: "
     "flood exposure, temperature and local deprivation."
 )
-HOW_TO_USE_ANCHOR = "how-to-use-this-dashboard"
 SCORE_CALCULATION_NOTE = (
     "Note: Score calculation: Overall risk score = 50% flood exposure + 30% "
     "temperature + 20% local deprivation. These weights are hypothetical and "
@@ -820,51 +819,43 @@ def render_dashboard_intro():
         ),
         unsafe_allow_html=True,
     )
-    st.markdown(
-        f'<a href="#{HOW_TO_USE_ANCHOR}">How to use this site</a>',
-        unsafe_allow_html=True,
-    )
 
 
 def render_dashboard_guide():
-    st.markdown(
-        f"""
-<span id="{HOW_TO_USE_ANCHOR}" style="display:block;scroll-margin-top:1rem;"></span>
-<section aria-labelledby="airis-guide-title">
-  <div id="airis-guide-title"
-       style="font-size:1.75rem;font-weight:600;line-height:1.3;
-       margin:0 0 0.75rem 0;">How to use this dashboard</div>
-  <ol style="padding-left:1.4rem;margin-bottom:0.75rem;">
-    <li style="margin-bottom:0.6rem;"><strong>Explore the map</strong><br>
-      Zoom, pan and hover over a charging station to view its name and latest
-      stored risk score.</li>
-    <li style="margin-bottom:0.6rem;"><strong>Select a station</strong><br>
-      Choose an existing charging station from the list to see its current and
-      seven-day forecast risk assessment.</li>
-    <li style="margin-bottom:0.6rem;"><strong>Review the results</strong><br>
-      Check the overall risk score, risk category and the contribution of flood
-      exposure, temperature and local deprivation.</li>
-    <li style="margin-bottom:0.6rem;"><strong>Assess a proposed site</strong><br>
-      Enter the site’s latitude and longitude, then use the sliders to set its
-      local deprivation and flood-exposure values. Temperature is retrieved
-      automatically from the site coordinates using current and forecast
-      weather data.</li>
-  </ol>
-  <div role="note" style="color:#c62828;background:rgba(198,40,40,0.06);
-       border:1px solid rgba(198,40,40,0.45);border-radius:0.4rem;
-       padding:0.75rem 1rem;margin:1rem 0;font-size:1.05rem;line-height:1.5;
-       white-space:normal;overflow-wrap:anywhere;">
-    {escape(SCORE_CALCULATION_NOTE)}
-  </div>
-</section>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.expander("How to Use this Dashboard", expanded=False):
+        st.markdown(
+            f"""
+<ol style="padding-left:1.4rem;margin-bottom:0.75rem;">
+  <li style="margin-bottom:0.6rem;"><strong>Explore the map</strong><br>
+    Zoom, pan and hover over a charging station to view its name and latest
+    stored risk score.</li>
+  <li style="margin-bottom:0.6rem;"><strong>Select a station</strong><br>
+    Choose an existing charging station from the list to see its current and
+    seven-day forecast risk assessment.</li>
+  <li style="margin-bottom:0.6rem;"><strong>Review the results</strong><br>
+    Check the overall risk score, risk category and the contribution of flood
+    exposure, temperature and local deprivation.</li>
+  <li style="margin-bottom:0.6rem;"><strong>Assess a proposed site</strong><br>
+    Enter the site’s latitude and longitude, then use the sliders to set its
+    local deprivation and flood-exposure values. Temperature is retrieved
+    automatically from the site coordinates using current and forecast
+    weather data.</li>
+</ol>
+<div role="note" style="color:#c62828;background:rgba(198,40,40,0.06);
+     border:1px solid rgba(198,40,40,0.45);border-radius:0.4rem;
+     padding:0.75rem 1rem;margin:1rem 0;font-size:1.05rem;line-height:1.5;
+     white-space:normal;overflow-wrap:anywhere;">
+  {escape(SCORE_CALCULATION_NOTE)}
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def main():
     st.title("AIRIS Cardiff PoC Dashboard")
     render_dashboard_intro()
+    render_dashboard_guide()
     st.info(f"**Active data mode: {dataset_mode_label(DATA_MODE)}**")
 
     try:
@@ -1229,8 +1220,6 @@ def main():
                 scenarios=scenarios,
             )
         )
-
-    render_dashboard_guide()
 
     # Footer disclaimer, detailed provenance and concise legal attribution
     st.markdown("---")

@@ -1,5 +1,7 @@
 import importlib
+import inspect
 from pathlib import Path
+from unittest.mock import Mock
 import pytest
 
 
@@ -32,12 +34,17 @@ def test_app_imports_without_errors():
 def test_dashboard_orientation_content(monkeypatch):
     app = importlib.import_module("app")
     rendered_markdown = []
+    expander = Mock()
+    expander.__enter__ = Mock(return_value=expander)
+    expander.__exit__ = Mock(return_value=False)
+    expander_call = Mock(return_value=expander)
 
     monkeypatch.setattr(
         app.st,
         "markdown",
         lambda text, **kwargs: rendered_markdown.append((text, kwargs)),
     )
+    monkeypatch.setattr(app.st, "expander", expander_call)
 
     app.render_dashboard_intro()
     app.render_dashboard_guide()
@@ -46,16 +53,9 @@ def test_dashboard_orientation_content(monkeypatch):
     assert app.INTRODUCTORY_DESCRIPTION in all_markdown
     assert 'role="note"' in rendered_markdown[0][0]
     assert "font-size:1.1rem" in rendered_markdown[0][0]
-    assert ">How to use this site</a>" in all_markdown
-    assert f'href="#{app.HOW_TO_USE_ANCHOR}"' in all_markdown
-    assert f'id="{app.HOW_TO_USE_ANCHOR}"' in all_markdown
-    assert all_markdown.count(f'id="{app.HOW_TO_USE_ANCHOR}"') == 1
-    assert all_markdown.index(f'id="{app.HOW_TO_USE_ANCHOR}"') < (
-        all_markdown.index("How to use this dashboard")
+    expander_call.assert_called_once_with(
+        "How to Use this Dashboard", expanded=False
     )
-    assert "<section" in all_markdown
-    assert 'aria-labelledby="airis-guide-title"' in all_markdown
-    assert 'id="airis-guide-title"' in all_markdown
     assert "<ol" in all_markdown
     for heading in (
         "Explore the map",
@@ -71,9 +71,25 @@ def test_dashboard_orientation_content(monkeypatch):
     )
     assert "color:#c62828" in all_markdown
     assert "overflow-wrap:anywhere" in all_markdown
+    assert "How to use this site" not in all_markdown
+    assert "how-to-use-this-dashboard" not in all_markdown
+
+
+def test_dashboard_guide_placement_and_uniqueness():
+    main_source = inspect.getsource(importlib.import_module("app").main)
+    assert main_source.count("render_dashboard_guide()") == 1
+    assert main_source.index("render_dashboard_intro()") < main_source.index(
+        "render_dashboard_guide()"
+    )
+    assert main_source.index("render_dashboard_guide()") < main_source.index(
+        "st.info("
+    )
+    app_source = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+    assert app_source.count('st.expander("How to Use this Dashboard"') == 1
+    assert "How to use this site" not in app_source
+    assert "how-to-use-this-dashboard" not in app_source
 
 
 def test_redundant_dashboard_subtitle_is_absent():
     app_source = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
     assert "EV charging-site risk intelligence" not in app_source
-    assert 'with st.expander("How to use this dashboard"' not in app_source
