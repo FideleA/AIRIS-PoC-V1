@@ -22,6 +22,7 @@ from config import (
     WEATHER_ATTRIBUTION,
 )
 from data_loader import load_stations
+from data_sources import ATTRIBUTIONS, DATA_SOURCES, FIELD_LABELS, render_value_html
 from portfolio_assessments import baseline_assessments_for_stations
 from scoring import compute_scores
 from weather_service import (
@@ -86,6 +87,35 @@ def attribution_statements(data_mode: str) -> list[str]:
             *statements,
         ]
     return statements
+
+
+def render_data_sources() -> None:
+    st.header("Data Sources")
+    st.caption(
+        "Detailed provenance for the external datasets and services used by "
+        "the AIRIS Cardiff proof of concept."
+    )
+    for record in DATA_SOURCES:
+        title = record["Dataset or service name"].text
+        with st.expander(title, expanded=False):
+            for label in FIELD_LABELS:
+                st.markdown(
+                    f'<div style="margin-bottom:0.85rem;overflow-wrap:anywhere;">'
+                    f"<strong>{escape(label)}</strong><br>"
+                    f"{render_value_html(record[label])}</div>",
+                    unsafe_allow_html=True,
+                )
+
+
+def render_data_attributions() -> None:
+    st.header("Data Attributions and Licences")
+    with st.expander("Legal attribution statements", expanded=False):
+        for attribution in ATTRIBUTIONS:
+            st.markdown(
+                f'<div style="margin-bottom:0.85rem;overflow-wrap:anywhere;">'
+                f"{render_value_html(attribution)}</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def verified_site_details(station) -> list[tuple[str, object]]:
@@ -873,7 +903,7 @@ def main():
             st.write("Scoring method: weighted additive model")
             st.write("Score range: 0–100")
             st.write("Forecast horizon: 7 days")
-        with st.expander('Data sources'):
+        with st.expander('Source summary'):
             st.write(f"Active station dataset: {dataset_mode_label(DATA_MODE)}")
             if DATA_MODE == "verified":
                 st.caption(
@@ -1202,12 +1232,11 @@ def main():
 
     render_dashboard_guide()
 
-    # Footer disclaimer and attribution
+    # Footer disclaimer, detailed provenance and concise legal attribution
     st.markdown("---")
     st.caption("This is an illustrative research PoC. It does not predict claims, calculate premiums or automate underwriting.")
-    with st.expander("Data attribution and licences"):
-        for statement in attribution_statements(DATA_MODE):
-            st.caption(statement)
+    render_data_sources()
+    render_data_attributions()
 
 if __name__ == '__main__':
     main()

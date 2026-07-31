@@ -194,4 +194,4 @@ def test_dashboard_copy_uses_explicit_alert_rule_and_hides_internal_data_paths()
     assert "Forecast alerts" not in source
     assert "data/processed/cardiff_stations_verified.csv" not in source
     assert "data/stations.csv" not in source
-    assert source.count('for statement in attribution_statements(DATA_MODE)') == 1
+    assert source.count("    render_data_attributions()") == 1
