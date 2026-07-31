@@ -822,9 +822,26 @@ def render_dashboard_intro():
 
 
 def render_dashboard_guide():
-    with st.expander("How to Use this Dashboard", expanded=False):
+    with st.container(key="airis_dashboard_guide"):
         st.markdown(
-            f"""
+            """
+<style>
+.st-key-airis_dashboard_guide details summary {
+  align-items: center;
+}
+.st-key-airis_dashboard_guide details summary p {
+  color: #1f2937 !important;
+  font-size: 1.1rem !important;
+  font-weight: 600 !important;
+  line-height: 1.4;
+}
+</style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.expander("How to Use this Dashboard", expanded=False):
+            st.markdown(
+                f"""
 <ol style="padding-left:1.4rem;margin-bottom:0.75rem;">
   <li style="margin-bottom:0.6rem;"><strong>Explore the map</strong><br>
     Zoom, pan and hover over a charging station to view its name and latest
@@ -847,9 +864,9 @@ def render_dashboard_guide():
      white-space:normal;overflow-wrap:anywhere;">
   {escape(SCORE_CALCULATION_NOTE)}
 </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def main():

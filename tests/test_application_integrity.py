@@ -38,6 +38,10 @@ def test_dashboard_orientation_content(monkeypatch):
     expander.__enter__ = Mock(return_value=expander)
     expander.__exit__ = Mock(return_value=False)
     expander_call = Mock(return_value=expander)
+    container = Mock()
+    container.__enter__ = Mock(return_value=container)
+    container.__exit__ = Mock(return_value=False)
+    container_call = Mock(return_value=container)
 
     monkeypatch.setattr(
         app.st,
@@ -45,6 +49,7 @@ def test_dashboard_orientation_content(monkeypatch):
         lambda text, **kwargs: rendered_markdown.append((text, kwargs)),
     )
     monkeypatch.setattr(app.st, "expander", expander_call)
+    monkeypatch.setattr(app.st, "container", container_call)
 
     app.render_dashboard_intro()
     app.render_dashboard_guide()
@@ -56,6 +61,12 @@ def test_dashboard_orientation_content(monkeypatch):
     expander_call.assert_called_once_with(
         "How to Use this Dashboard", expanded=False
     )
+    container_call.assert_called_once_with(key="airis_dashboard_guide")
+    assert ".st-key-airis_dashboard_guide details summary p" in all_markdown
+    assert "font-size: 1.1rem !important" in all_markdown
+    assert "font-weight: 600 !important" in all_markdown
+    assert "color: #1f2937 !important" in all_markdown
+    assert "align-items: center" in all_markdown
     assert "<ol" in all_markdown
     for heading in (
         "Explore the map",
