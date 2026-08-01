@@ -78,7 +78,7 @@ def test_records_do_not_render_absolute_paths_or_unexplained_placeholders():
         assert all(value.text != UNKNOWN for value in record.values())
 
 
-def test_data_source_renderer_uses_collapsed_expanders_and_new_tab_links(monkeypatch):
+def test_data_source_renderer_nests_records_in_one_collapsed_parent(monkeypatch):
     expander = Mock()
     expander.__enter__ = Mock(return_value=expander)
     expander.__exit__ = Mock(return_value=False)
@@ -96,12 +96,24 @@ def test_data_source_renderer_uses_collapsed_expanders_and_new_tab_links(monkeyp
     app.render_data_sources()
 
     app.st.header.assert_called_once_with("Data Sources")
-    assert expander_call.call_count == len(DATA_SOURCES)
+    assert expander_call.call_count == len(DATA_SOURCES) + 1
+    assert expander_call.call_args_list[0].args == ("View Data Sources",)
+    assert expander_call.call_args_list[0].kwargs == {"expanded": False}
+    child_calls = expander_call.call_args_list[1:]
+    assert [call.args[0] for call in child_calls] == [
+        record["Dataset or service name"].text for record in DATA_SOURCES
+    ]
     assert all(call.kwargs == {"expanded": False} for call in expander_call.call_args_list)
     html = "\n".join(text for text, _ in rendered)
     assert 'target="_blank"' in html
     assert 'rel="noopener noreferrer"' in html
     assert all(f"<strong>{label}</strong>" in html for label in FIELD_LABELS)
+    renderer_source = inspect.getsource(app.render_data_sources)
+    assert renderer_source.count('st.expander("View Data Sources"') == 1
+    assert renderer_source.count("for record in DATA_SOURCES") == 1
+    assert renderer_source.index('st.expander("View Data Sources"') < (
+        renderer_source.index("for record in DATA_SOURCES")
+    )
 
 
 def test_data_sources_precede_attributions_in_main_page():

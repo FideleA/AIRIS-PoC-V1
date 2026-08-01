@@ -94,16 +94,17 @@ def render_data_sources() -> None:
         "Detailed provenance for the external datasets and services used by "
         "the AIRIS Cardiff proof of concept."
     )
-    for record in DATA_SOURCES:
-        title = record["Dataset or service name"].text
-        with st.expander(title, expanded=False):
-            for label in FIELD_LABELS:
-                st.markdown(
-                    f'<div style="margin-bottom:0.85rem;overflow-wrap:anywhere;">'
-                    f"<strong>{escape(label)}</strong><br>"
-                    f"{render_value_html(record[label])}</div>",
-                    unsafe_allow_html=True,
-                )
+    with st.expander("View Data Sources", expanded=False):
+        for record in DATA_SOURCES:
+            title = record["Dataset or service name"].text
+            with st.expander(title, expanded=False):
+                for label in FIELD_LABELS:
+                    st.markdown(
+                        f'<div style="margin-bottom:0.85rem;overflow-wrap:anywhere;">'
+                        f"<strong>{escape(label)}</strong><br>"
+                        f"{render_value_html(record[label])}</div>",
+                        unsafe_allow_html=True,
+                    )
 
 
 def render_data_attributions() -> None:
